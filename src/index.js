@@ -2441,24 +2441,40 @@ function OwnedAircraftCard({
         }
       } catch {}
 
-      const candidateNamesSet = new Set(buildZipNameCandidates(zipName));
+      const candidateNames = [];
+      const addCandidate = (n) => {
+        const name = String(n || '').trim();
+        if (!name) return;
+        if (!candidateNames.includes(name)) candidateNames.push(name);
+      };
+      // Prefer manifest-reported names first so newer artifacts win if old ZIPs still exist on CDN.
       try {
         const manifestHints = await fetchManifestZipHints(product, simKey, channel);
-        (manifestHints || []).forEach(name => candidateNamesSet.add(name));
+        (manifestHints || []).forEach(addCandidate);
       } catch {}
+      buildZipNameCandidates(zipName).forEach(addCandidate);
       // Some packages reuse the base ZIP filename for variant payloads — allow fallback when resolving variants
       try {
         const allowVariantToBase = isVariant; // enable for both Public and Beta
         if (allowVariantToBase) {
           const bz = getBaseZipForSim(product, simKey);
-          if (bz) buildZipNameCandidates(bz).forEach(n => candidateNamesSet.add(n));
+          if (bz) buildZipNameCandidates(bz).forEach(addCandidate);
         }
       } catch {}
-      const candidateNames = Array.from(candidateNamesSet);
+      // If we know the remote version, prefer candidate ZIP names that contain it.
+      // This prevents older legacy ZIP names from winning when both still exist on CDN.
+      const remoteVerToken = String(getRemoteVerForSim(simTag) || '').trim();
+      const versionMatched = remoteVerToken
+        ? candidateNames.filter(n => String(n).includes(remoteVerToken))
+        : [];
+      // Strict mode: when we know the remote version, do NOT fall back to legacy/non-versioned names.
+      // This avoids silently downloading older artifacts that still exist on CDN.
+      if (remoteVerToken && versionMatched.length === 0) return '';
+      const effectiveCandidateNames = versionMatched.length ? versionMatched : candidateNames;
       let urls = [
         ...directHints,
         // Use product-aware bucket choice: for 2020+ products, this maps 2024 → 2020
-        ...candidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKey, channel, f, z)))
+        ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKey, channel, f, z)))
       ];
 
       // PC-12 name permutations removed — fetchManifestZipHints already provides the correct zip name
@@ -2715,14 +2731,33 @@ function OwnedAircraftCard({
       const resolveZipUrl = async (simKeyLocal, channel, zipName, { isVariant = false } = {}) => {
         if (!zipName) return '';
   const timeBudget = channel === 'Beta' ? (isVariant ? 5000 : 3000) : 1500;
-        const candidateNamesSet = new Set(buildZipNameCandidates(zipName));
+        const candidateNames = [];
+        const addCandidate = (n) => {
+          const name = String(n || '').trim();
+          if (!name) return;
+          if (!candidateNames.includes(name)) candidateNames.push(name);
+        };
+        try {
+          const manifestHints = await fetchManifestZipHints(product, simKeyLocal, channel);
+          (manifestHints || []).forEach(addCandidate);
+        } catch {}
+        buildZipNameCandidates(zipName).forEach(addCandidate);
         if (isVariant) {
           const bz = getBaseZipForSim(product, simKeyLocal);
-          if (bz) buildZipNameCandidates(bz).forEach(n => candidateNamesSet.add(n));
+          if (bz) buildZipNameCandidates(bz).forEach(addCandidate);
         }
-        const candidateNames = Array.from(candidateNamesSet);
+        // If we know the remote version, prefer candidate ZIP names that contain it.
+        // This prevents older legacy ZIP names from winning when both still exist on CDN.
+        const remoteVerToken = String(getRemoteVerForSim(simTag) || '').trim();
+        const versionMatched = remoteVerToken
+          ? candidateNames.filter(n => String(n).includes(remoteVerToken))
+          : [];
+        // Strict mode: when we know the remote version, do NOT fall back to legacy/non-versioned names.
+        // This avoids silently downloading older artifacts that still exist on CDN.
+        if (remoteVerToken && versionMatched.length === 0) return '';
+        const effectiveCandidateNames = versionMatched.length ? versionMatched : candidateNames;
   let urls = [
-          ...candidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKeyLocal, channel, f, z)))
+          ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKeyLocal, channel, f, z)))
         ];
         for (const u of urls) { if (await headOk(u, (timeBudget))) return u; }
         // cdnBucketForSim already maps to the correct bucket; no cross-sim fallback needed
@@ -5278,6 +5313,9 @@ function OwnedAircraftCard({
         if (unified) return unified;
       } catch {}
     }
+    // Once version fetch completed, do not fall back to ZIP/installed versions.
+    // Showing stale config ZIP versions here can mask newer CDN manifest versions.
+    if (versionFetchDone) return '';
     // ZIP-name heuristic when manifest is not yet known for selected channel
     const expZip = sim === 'FS2020' ? expectedZip2020 : expectedZip2024;
     if (expZip) {
@@ -5287,7 +5325,7 @@ function OwnedAircraftCard({
     // Installed version last
     const inst = sim === 'FS2020' ? installed2020Version : installed2024Version;
     return inst || '';
-  }, [selectedRemoteVersion, unifiedSimTag, expectedZip2020, expectedZip2024, installed2020Version, installed2024Version, is2020Plus, remoteVersUnified?.FS2020, remoteVersUnified?.FS2024]);
+  }, [selectedRemoteVersion, unifiedSimTag, expectedZip2020, expectedZip2024, installed2020Version, installed2024Version, is2020Plus, remoteVersUnified?.FS2020, remoteVersUnified?.FS2024, versionFetchDone]);
 
   // Header version pill: always show something immediately by allowing safe fallbacks
   // Priority: selected-channel remote > other-channel remote (suffix) > any remote > ZIP hint > installed > checking…
@@ -5301,6 +5339,11 @@ function OwnedAircraftCard({
         if (warmSel) primary = warmSel;
       }
       if (primary) return { text: `v${primary}`, title: `Latest ${selChan} version for ${sim}` };
+
+      // Once fetch completed and no remote version is known, avoid stale ZIP/install version fallbacks.
+      if (versionFetchDone) {
+        return { text: 'checking…', title: 'No remote version found from manifest' };
+      }
 
       // Strict channel enforcement: no cross-channel fallback in header pill
 
@@ -5319,7 +5362,7 @@ function OwnedAircraftCard({
     } catch {
       return { text: 'checking…', title: 'Fetching version…' };
     }
-  }, [unifiedSimTag, getChan, selectedRemoteVersion, remoteVersPublic.FS2020, remoteVersPublic.FS2024, remoteVersBeta.FS2020, remoteVersBeta.FS2024, expectedZip2020, expectedZip2024, dl2020?.variantZip, dl2020?.baseZip, dl2024?.variantZip, dl2024?.baseZip, installed2020Version, installed2024Version]);
+  }, [unifiedSimTag, getChan, selectedRemoteVersion, remoteVersPublic.FS2020, remoteVersPublic.FS2024, remoteVersBeta.FS2020, remoteVersBeta.FS2024, expectedZip2020, expectedZip2024, dl2020?.variantZip, dl2020?.baseZip, dl2024?.variantZip, dl2024?.baseZip, installed2020Version, installed2024Version, versionFetchDone]);
   const selectedDlRec = (unifiedSimTag === 'FS2020') ? dl2020 : dl2024;
   // Determine downloaded version STRICTLY for the selected channel (ignore other-channel cache)
   function bestDownloadedVersionForSelected(rec, chan) {
