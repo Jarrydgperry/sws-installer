@@ -3226,7 +3226,7 @@ function OwnedAircraftCard({
   if (is2020Plus && v.fromSim !== simTag && ch === effectiveSelectedChanSim) return true; // only when unified mode active
       return false;
     }
-    return effectiveSelectedChanSim === 'Public';
+    return false;
   });
   // Strict channel enforcement: no cross-channel cache reuse.
   // If selected channel has no cached files, the user must download for that channel.
@@ -3239,23 +3239,7 @@ function OwnedAircraftCard({
   // Base availability must align with the expected package (channel or version match)
   const hasBaseForSelectedChan = !!(baseOkHereForSelected || baseOkAltForSelected || baseOkOtherHere || baseOkOtherAlt);
 
-  // --- Beta first-click issue mitigation ---
-  // If the user switches to Beta but the cached files have no explicit channel tag (older cache entries)
-  // the first render treats them as Public only, forcing the user to click once (no-op) and then again
-  // after inference/persistence marks the channel. We relax the rule: when Beta is selected and we have
-  // at least one cached variant/base with either (a) missing channel tag or explicitly Public (allowing reuse),
-  // and there is no installed copy yet for this sim, treat the cache as immediately usable for installation.
-  // This avoids the confusing “need to click twice” behavior.
-  const ambiguousChannelReuse = (
-    effectiveSelectedChanSim === 'Beta' &&
-    !installedSim &&
-    !hasZipForSelected &&
-    cachedVariants.some(v => {
-      const ch = (v.rec?.channel || '').trim();
-      return !ch || ch === 'Public';
-    })
-  );
-  let hasZipForSelectedEffective = hasZipForSelected || ambiguousChannelReuse;
+  let hasZipForSelectedEffective = hasZipForSelected;
   // Re-evaluate after channel version-reuse augmentation
   if (!hasZipForSelectedEffective && cachedForSelectedChannel.length > 0) {
     hasZipForSelectedEffective = true;
