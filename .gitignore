@@ -17,4 +17,7 @@ public/*.map
 downloads/
 packages/
 
+# Backup/scratch files
+prev_*.js
+
 
