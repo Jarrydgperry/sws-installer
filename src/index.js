@@ -6704,7 +6704,7 @@ function OwnedAircraftCard({
         <div className="sws-modal-overlay" role="dialog" aria-modal="true" onMouseDown={(e) => { /* explicit Accept/Reject */ }}>
           <div className="sws-modal sws-modal-lg" role="document">
             <div className="sws-modal-header">
-              <h3 className="sws-modal-title" style={{ margin:0 }}>End User License Agreement</h3>
+              <h3 className="sws-modal-title" style={{ margin:0, color:'#fff' }}>End User License Agreement</h3>
             </div>
             <div className="sws-modal-body" style={{ lineHeight:1.6, fontSize:12, maxHeight:'60vh', overflowY:'auto' }}>
               {(() => {
