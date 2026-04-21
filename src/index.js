@@ -914,16 +914,19 @@ function OwnedAircraftCard({
     // Download selection now opens a focus-trapped modal instead of a dropdown
     const [showDownloadModal, setShowDownloadModal] = useState(false);
   const [updateMode, setUpdateMode] = useState(false);
-    // forceUpdate is a debug-only session flag; never restore from localStorage so stale flags
-    // from previous sessions don't persist and wrongly show the "Update available" pill.
+    // forceUpdate is a debug-only test flag. Keep local state for quick toggles, but also
+    // honor the persisted localStorage switch so testing still works if card state desyncs.
     const [forceUpdate, setForceUpdate] = useState(false);
+    const forceUpdateActive = forceUpdate || (() => {
+      try { return localStorage.getItem('sws_forceUpdate') === '1'; } catch { return false; }
+    })();
 
     useEffect(() => {
       const onKey = (e) => {
         try {
           const key = String(e.key || '').toLowerCase();
           if ((e.ctrlKey || e.metaKey) && e.altKey && key === 'u') {
-            const next = !forceUpdate;
+            const next = !forceUpdateActive;
             setForceUpdate(next);
             try { localStorage.setItem('sws_forceUpdate', next ? '1' : '0'); } catch {}
             onStatus?.(next ? 'Forced update: ON' : 'Forced update: OFF');
@@ -982,7 +985,7 @@ function OwnedAircraftCard({
       // Use capture phase to avoid being blocked by other key handlers (focus traps, etc.)
       window.addEventListener('keydown', onKey, true);
       return () => window.removeEventListener('keydown', onKey, true);
-    }, [forceUpdate, onStatus, betaAckKey, unifiedSimTag, getChan]);
+    }, [forceUpdateActive, onStatus, betaAckKey, unifiedSimTag, getChan]);
     const downloadModalRef = useRef(null);
     const prevFocusRef = useRef(null);
   const [showVariantModal, setShowVariantModal] = useState(false);
@@ -2638,7 +2641,12 @@ function OwnedAircraftCard({
       if (!existing && is2020Plus) {
         const otherSimTag = simTag === 'FS2020' ? 'FS2024' : 'FS2020';
         const otherRec = downloadedFiles?.[product.id]?.sims?.[otherSimTag] || readDlCacheForProduct(product, otherSimTag, chan) || null;
-        if (otherRec && (otherRec.channel === chan || Object.values(otherRec.variants || {}).some(v => (v?.channel || 'Public') === chan))) {
+        const otherRecChan = (otherRec?.channel || inferChannelFromRecord(otherRec) || '').trim();
+        const hasOtherVariantForChan = Object.values(otherRec?.variants || {}).some(v => {
+          const vChan = (v?.channel || otherRec?.channel || inferChannelFromRecord(v) || '').trim();
+          return vChan === chan;
+        });
+        if (otherRec && (otherRecChan === chan || hasOtherVariantForChan)) {
           // Skip cross-sim reuse if the cached version is stale (remote has a newer version)
           const otherCachedV = (otherRec.version || '').trim();
           const otherRemoteV = (getRemoteVerForSim(simTag) || '').trim();
@@ -2844,7 +2852,7 @@ function OwnedAircraftCard({
       const installedVer = (simTag === 'FS2020') ? (installed2020Version || '') : (installed2024Version || '');
       const remoteVer = getRemoteVerForSim(simTag) || '';
       let isUpdate = false;
-      if (forceUpdate) {
+      if (forceUpdateActive) {
         isUpdate = true;
       } else if (installedSim && installedVer && remoteVer && compareVersionsNormalized(remoteVer, installedVer) > 0) {
         isUpdate = true;
@@ -2858,7 +2866,7 @@ function OwnedAircraftCard({
       // Fallback: if anything goes wrong, proceed directly with download
       try { await downloadAllForSim(simTag, chan); } catch {}
     }
-  }, [installed2020, installed2024, installed2020Version, installed2024Version, forceUpdate, getRemoteVerForSim, maybeShowPreDownloadChangelog, downloadAllForSim]);
+  }, [installed2020, installed2024, installed2020Version, installed2024Version, forceUpdateActive, getRemoteVerForSim, maybeShowPreDownloadChangelog, downloadAllForSim]);
 
   // Begin the gated download flow (EULA, optional pre-download changelog only for updates)
   const beginDownloadFlow = useCallback(async (simTag) => {
@@ -5195,7 +5203,7 @@ function OwnedAircraftCard({
     (!iv24 && !!rv24 && !(dv24 && compareVersionsNormalized(dv24, rv24) >= 0))
   );
 
-  const anyUpdateAvailable = !!(hasUpdate2020 || hasUpdate2024 || (forceUpdate && (!!installed2020 || !!installed2024)));
+  const anyUpdateAvailable = !!(hasUpdate2020 || hasUpdate2024 || (forceUpdateActive && (!!installed2020 || !!installed2024)));
 
   // --- Overwrite risk detection: if user configured both sim Community paths to the same folder, installs between FS2020/FS2024 or channel switches can overwrite ---
   const sharedCommunityPath = useMemo(() => {
