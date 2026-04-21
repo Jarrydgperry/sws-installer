@@ -1861,17 +1861,27 @@ ipcMain.handle('install-aircraft', async (_e, opts = {}) => {
 // Never rm -rf the root downloads dir itself — the user may have pointed it at a
 // folder containing other files.
 const SWS_DL_FILE_RE = /\.(zip|zip\.enc|zip\.part|meta\.json|part|enc)$/i;
+// SWS downloads are always stored under one of these top-level bucket subdirectories.
+// We ONLY touch these known subdirs so that unrelated files/folders in the user's
+// chosen downloads folder are never accidentally deleted.
+const SWS_DL_BUCKET_DIRS = new Set(['2020', '2024']);
+
 async function safeClearDownloadsDir() {
   const dir = getDownloadsBaseDir();
   let entries;
   try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return { success: true }; }
   for (const ent of entries) {
-    const full = path.join(dir, ent.name);
-    if (ent.isDirectory()) {
-      // Recurse into subdirectories and remove SWS files, then remove dir if empty
+    // Only recurse into known SWS bucket subdirectories ('2020', '2024').
+    // Root-level files and any other subdirectories are never touched — the user
+    // may have stored other content in the same folder.
+    if (ent.isDirectory() && SWS_DL_BUCKET_DIRS.has(ent.name)) {
+      const full = path.join(dir, ent.name);
       await safeClearSubdir(full);
-    } else if (ent.isFile() && SWS_DL_FILE_RE.test(ent.name)) {
-      try { await fs.promises.unlink(full); } catch {}
+      // Remove the bucket dir itself if now empty
+      try {
+        const remaining = await fs.promises.readdir(full);
+        if (remaining.length === 0) await fs.promises.rmdir(full);
+      } catch {}
     }
   }
   return { success: true };
