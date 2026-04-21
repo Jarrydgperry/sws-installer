@@ -6720,7 +6720,9 @@ function OwnedAircraftCard({
       {eulaModal.open && createPortal((
         <div className="sws-modal-overlay" role="dialog" aria-modal="true" onMouseDown={(e) => { /* explicit Accept/Reject */ }}>
           <div className="sws-modal sws-modal-lg" role="document">
-            <h3 className="sws-modal-title">End User License Agreement</h3>
+            <div className="sws-modal-header">
+              <h3 className="sws-modal-title" style={{ margin:0 }}>End User License Agreement</h3>
+            </div>
             <div className="sws-modal-body" style={{ lineHeight:1.6, fontSize:12, maxHeight:'60vh', overflowY:'auto' }}>
               {(() => {
                 const pname = (product?.name && String(product.name).trim()) || 'SimWorks Studios Product';
@@ -11050,7 +11052,6 @@ const lastProgressRef = useRef({ value: 0, ts: 0 });
               try {
                 const had = localStorage.getItem('sws_eula_accepted_v1') === '1';
                 localStorage.removeItem('sws_eula_accepted_v1');
-                setEulaAccepted(false);
                 setStatus(had ? 'EULA consent cleared. You will be prompted to accept again before the next download.' : 'No EULA consent found to clear.');
               } catch (e) {
                 setStatus('Could not clear EULA consent: ' + (e?.message || String(e)));
