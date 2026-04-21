@@ -3900,8 +3900,6 @@ function OwnedAircraftCard({
 
   // Show Modify gear for all products; enable it only when something is installed for this sim
   const showGear = true;
-  // Enable Modify even when product is not installed (allows changing variant, viewing changelog, etc.)
-  const gearEnabled = true;
   // Installed version subtext for the button
   const installedVersionSubtext = (() => {
     if (mode === 'unavailable') return 'Currently Not Available';
@@ -6191,6 +6189,10 @@ function OwnedAircraftCard({
                   await beginDownloadFlowWithChan(target, intendedChan);
                 }
               };
+              // Disable Modify when product is fully unavailable and nothing is installed or cached
+              const _anyInstalled = !!(installed2020 || installed2024);
+              const _anyCached = !!(dl2020?.localPath || dl2024?.localPath);
+              const gearEnabled = !noAvailableDownloads || _anyInstalled || _anyCached;
               return (
                 <div style={{ position:'relative', alignSelf:'stretch', flex:'1 1 0' }}>
                   <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 48px', gap:12, alignItems:'stretch', height:'100%', minHeight:0, position:'relative' }}>
@@ -6218,18 +6220,20 @@ function OwnedAircraftCard({
                     )}
                   <button
                     type="button"
-                    onClick={() => setShowModifyMenuSim(prev => prev ? null : 'product')}
-                    title="Modify options"
+                    disabled={!gearEnabled}
+                    onClick={() => { if (gearEnabled) setShowModifyMenuSim(prev => prev ? null : 'product'); }}
+                    title={gearEnabled ? 'Modify options' : 'Not available'}
                     style={{
                       width:'100%', boxSizing:'border-box',
                       aspectRatio:'1', 
-                      background:'#232b32',
+                      background: gearEnabled ? '#232b32' : '#1a1f24',
                       color:'#fff',
                       border:'none',
                       borderRadius:0,
                       display:'flex', alignItems:'center', justifyContent:'center',
-                      cursor:'pointer',
-                      boxShadow:'none'
+                      cursor: gearEnabled ? 'pointer' : 'default',
+                      boxShadow:'none',
+                      opacity: gearEnabled ? 1 : 0.35
                     }}
                   >
                     <img src={cogIcon} alt="Settings" style={{ width:40, height:40 }} />
