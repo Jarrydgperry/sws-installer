@@ -3168,6 +3168,15 @@ function OwnedAircraftCard({
   installedChan = /beta/i.test(installedChan) ? 'Beta' : 'Public';
   // Use effectiveSelectedChanSim (may unify mismatched first-frame channels for 2020+ products)
   const channelDiffers = !!installedSim && installedChan && (installedChan !== effectiveSelectedChanSim);
+  // Declare update-comparison vars HERE so they are initialized before the mode/label if-else chain below.
+  // (Babel transpiles const→var; referencing them after the chain caused them to be undefined/falsy
+  //  and broke the "Replace vOLD with vNEW" update flow entirely.)
+  const installedVersionForSim2 = simTag === 'FS2020' ? installed2020Version : installed2024Version;
+  const dlVersionForSim2 = (typeof effectiveDlRec?.version === 'string' && effectiveDlRec.version.trim()) ? effectiveDlRec.version.trim() : '';
+  const sameBranch = installedChan === effectiveSelectedChanSim;
+  const sameBranchNewerDownloaded2 = (!!dlVersionForSim2 && sameBranch && installedVersionForSim2 && compareVersionsNormalized(dlVersionForSim2, installedVersionForSim2) > 0);
+  // Remote newer (update available) even if not downloaded yet
+  const remoteNewerThisSim = (simTag === 'FS2020') ? !!hasUpdate2020 : !!hasUpdate2024;
     // Gather cached variants by channel
     const cachedVariants = (() => {
       const items = [];
@@ -3555,16 +3564,6 @@ function OwnedAircraftCard({
       : installedSim
         ? (installedChan === 'Beta' ? outlineBeta : outlinePublic)
         : (effectiveSelectedChanSim === 'Beta' ? outlineBeta : outlinePublic);
-
-  const installedVersionForSim2 = simTag === 'FS2020' ? installed2020Version : installed2024Version;
-  // Use downloaded version for update comparison. Accept it from the effectiveDlRec if it has
-  // a version string — no longer gated on matchesExpectedBase, because single-zip products and
-  // freshly-downloaded updates may not have baseLocalPath set.
-  const dlVersionForSim2 = (typeof effectiveDlRec?.version === 'string' && effectiveDlRec.version.trim()) ? effectiveDlRec.version.trim() : '';
-    const sameBranch = installedChan === effectiveSelectedChanSim;
-  const sameBranchNewerDownloaded2 = (!!dlVersionForSim2 && sameBranch && installedVersionForSim2 && compareVersionsNormalized(dlVersionForSim2, installedVersionForSim2) > 0);
-  // Remote newer (update available) even if not downloaded yet
-  const remoteNewerThisSim = (simTag === 'FS2020') ? !!hasUpdate2020 : !!hasUpdate2024;
 
 
     // Fill logic per spec
@@ -4023,7 +4022,7 @@ function OwnedAircraftCard({
     }
   } catch {}
   // [DEBUG] Trace final version values
-  if (product?.id) {
+  if (__SWS_DEBUG_GLOBAL && product?.id) {
     console.debug('[SWS-VERSION-DEBUG] Product:', product.id, product.name,
       '\n  installedVers:', installedVers,
       '\n  installed2020Version:', installed2020Version,
