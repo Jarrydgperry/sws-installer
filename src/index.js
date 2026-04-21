@@ -5941,8 +5941,13 @@ function OwnedAircraftCard({
               let hasNewToDownload = false;
               const hasNewReasons = [];
               if (selectedRemoteVersionDisplay) {
-                if (!isLatestAlreadyDownloaded) { hasNewToDownload = true; hasNewReasons.push('remoteVersionNewer'); }
-                else { hasNewReasons.push('remoteAlreadyCachedLatest'); }
+                // Only suppress download when the latest version is actually cached as a file.
+                // If the installed version matches remote but no ZIP is cached, still allow download
+                // so the user can re-download for reinstall purposes.
+                if (!isLatestAlreadyDownloaded || !hasFilesCachedForSelection) {
+                  hasNewToDownload = true;
+                  hasNewReasons.push(!isLatestAlreadyDownloaded ? 'remoteVersionNewer' : 'latestInstalledButNotCached');
+                } else { hasNewReasons.push('remoteAlreadyCachedLatest'); }
               } else {
                 if (!hasFilesCachedForSelection) { hasNewToDownload = true; hasNewReasons.push('noRemoteVersionAndNoCache'); }
                 else { hasNewReasons.push('noRemoteVersionButCachePresent'); }
@@ -11037,6 +11042,24 @@ const lastProgressRef = useRef({ value: 0, ts: 0 });
             title="Withdraw your beta consent for all products. You will be asked to accept the beta warning again before any future beta downloads."
           >
             Reset beta consent
+          </button>
+          {/* Reset EULA acceptance */}
+          <button
+            type="button"
+            onClick={() => {
+              try {
+                const had = localStorage.getItem('sws_eula_accepted_v1') === '1';
+                localStorage.removeItem('sws_eula_accepted_v1');
+                setEulaAccepted(false);
+                setStatus(had ? 'EULA consent cleared. You will be prompted to accept again before the next download.' : 'No EULA consent found to clear.');
+              } catch (e) {
+                setStatus('Could not clear EULA consent: ' + (e?.message || String(e)));
+              }
+            }}
+            style={{ background: '#37474f', color: '#fff', border: `1px solid ${SWS_THEME.outline.neutral}`, borderRadius: 0, padding: '10px 16px', fontWeight: 700, cursor: 'pointer', boxShadow: 'none', marginBottom: 8 }}
+            title="Clear your EULA acceptance. You will be asked to accept the End User License Agreement again before the next download."
+          >
+            Reset EULA consent
           </button>
         </div>
             </div>
