@@ -6714,10 +6714,33 @@ function OwnedAircraftCard({
       {/* EULA Modal */}
       {eulaModal.open && createPortal((
         <div className="sws-modal-overlay" role="dialog" aria-modal="true" onMouseDown={(e) => { /* explicit Accept/Reject */ }}>
-          <div className="sws-modal sws-modal-md" role="document">
+          <div className="sws-modal sws-modal-lg" role="document">
             <h3 className="sws-modal-title">End User License Agreement</h3>
-            <div className="sws-modal-body" style={{ lineHeight:1.4, fontSize:13 }}>
-              By downloading and installing this product you agree to SimWorks Studios' EULA. The software is licensed, not sold. Redistribution is prohibited. See the full EULA on our website.
+            <div className="sws-modal-body" style={{ lineHeight:1.6, fontSize:12, maxHeight:'60vh', overflowY:'auto' }}>
+              {(() => {
+                const pname = (product?.name && String(product.name).trim()) || 'SimWorks Studios Product';
+                return (<>
+                  <p style={{ fontWeight:700, marginTop:0 }}>END-USER LICENSE AGREEMENT (EULA) for SimWorks Studios {pname} for Microsoft Flight Simulator Addon.</p>
+                  <p>IMPORTANT - PLEASE READ CAREFULLY: This End-User License Agreement ("EULA") is a legal agreement between you (either an individual or single entity) and SimWorks Studios Ltd., for the SimWorks Studios Ltd. software product identified above, which includes software and includes associated media and "online" or electronic documentation ("SOFTWARE PRODUCT"). The SOFTWARE PRODUCT also includes any updates and supplements to the original SOFTWARE PRODUCT which may be provided to you by SimWorks Studios Ltd. By accessing or otherwise using the SOFTWARE PRODUCT, you agree to be bound by the terms of this EULA. If you do not agree to the terms of this EULA, do not use the SOFTWARE PRODUCT.</p>
+                  <p style={{ fontWeight:700 }}>SOFTWARE PRODUCT LICENSE</p>
+                  <p>The SOFTWARE PRODUCT is protected by copyright laws and international copyright treaties, as well as other intellectual property laws and treaties. The SOFTWARE PRODUCT is sold as a single user license and no ownership is transferred, only the right to use the license software. The SOFTWARE PRODUCT may not be re-distributed, sold for non-profit or profit from subscription fees, repackaged, delivered on CD or DVD media or any other form of electronic media by any other persons or party, website, organisation or entity, other than the official e-commerce seller website(s) as contracted or authorised by SimWorks Studios Ltd.</p>
+                  <p style={{ fontWeight:700 }}>1. GRANT OF LICENSE. This EULA grants you the following rights:</p>
+                  <p><strong>a.</strong> You may install, access, and run a SINGLE copy of the SOFTWARE PRODUCT on a SINGLE personal computer for your personal, non-commercial, non-profit use. Any party or organisation seeking to use the SOFTWARE PRODUCT under license for commercial use should contact us through e-mail at simworksstudios@gmail.com.</p>
+                  <p><strong>b.</strong> This SOFTWARE PRODUCT is for personal entertainment purposes only and may not be used for flight training purposes. This SOFTWARE PRODUCT is not part of an approved training program under the standards of any aviation regulatory agency or body worldwide, whether private or government.</p>
+                  <p><strong>c.</strong> Separation of Components. The SOFTWARE PRODUCT is licensed as a single product. Its original component parts created by SimWorks Studios Ltd. may not be separated for use in other software or projects.</p>
+                  <p><strong>d.</strong> Trademarks. This EULA does not grant you any rights in connection with any trademarks or service marks of SimWorks Studios Ltd. or Van's Aircraft, Inc.</p>
+                  <p><strong>e.</strong> Rental. You may not rent, lease, or lend the SOFTWARE PRODUCT. You may not charge admission fees for any simulator, entertainment or training device which breaches this EULA by use of the SOFTWARE PRODUCT therein.</p>
+                  <p><strong>f.</strong> Support Services. This SOFTWARE PRODUCT is provided "as is", however SimWorks Studios Ltd. will provide provision of support services in relation to the operation, installation or remedy of issues arising to the use of the SOFTWARE at its official support venue at simworksstudios.com.</p>
+                  <p><strong>g.</strong> Termination. Without prejudice to any other rights, SimWorks Studios Ltd. may terminate this EULA if you fail to comply with the terms and conditions of this EULA. In such event, you must destroy all copies of the SOFTWARE PRODUCT and all of its component parts.</p>
+                  <p style={{ fontWeight:700 }}>2. COPYRIGHT.</p>
+                  <p>All title and copyrights in and to the original created components of the SOFTWARE PRODUCT (including but not limited to any images, photographs, animations, video, audio, music, and test incorporated into the SOFTWARE PRODUCT), the accompanying documentation materials, and any copies of the SOFTWARE PRODUCT are owned by SimWorks Studios Ltd. or its suppliers. All title and intellectual property rights in and to additional third party libraries and content (which are used under the terms of those components' distribution) which may be accessed through use of the SOFTWARE PRODUCT is the property of the respective content owner and may be protected by applicable copyright or other intellectual property laws and treaties. This EULA grants you no rights to use such content. This SOFTWARE PRODUCT contains documentation which is provided only in electronic form, and you may print multiple copies of such electronic documentation.</p>
+                  <p>SimWorks Studios {pname} for Microsoft Flight Simulator — SimWorks Studios<br/>Microsoft Flight Simulator is a copyrighted trademark of Microsoft Corporation.</p>
+                  <p style={{ fontWeight:700 }}>3. LEGAL JURISDICTION.</p>
+                  <p>This EULA is governed by the laws of Cyprus and the European Union.</p>
+                  <p style={{ fontWeight:700 }}>4. LIMITATION OF LIABILITY.</p>
+                  <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL SIMWORKS STUDIOS LTD. BE LIABLE FOR ANY SPECIAL, INCIDENTAL, INDIRECT, OR CONSEQUENTIAL DAMAGES WHATSOEVER (INCLUDING, WITHOUT LIMITATION, DAMAGES FOR LOSS OF BUSINESS PROFITS, BUSINESS INTERRUPTION, LOSS OF BUSINESS INFORMATION, OR ANY OTHER PECUNIARY LOSS) ARISING OUT OF THE USE OF OR INABILITY TO USE THE SOFTWARE PRODUCT OR THE PROVISION OF OR FAILURE TO PROVIDE SUPPORT SERVICES, EVEN IF SIMWORKS STUDIOS LTD. HAS BEEN ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.</p>
+                </>);
+              })()}
             </div>
             <div className="sws-modal-actions">
               <button type="button" className="btn btn-ghost" onClick={() => setEulaModal({ open:false, simTag:null, channel:'Public' })}>Reject</button>
