@@ -1,0 +1,111 @@
+{
+  "name": "sws-installer",
+  "version": "0.0.17",
+  "description": "SimWorks Studios MSFS Installer",
+  "author": "SimWorks Studios",
+  "main": "main.js",
+  "scripts": {
+    "dev": "concurrently -k -n RENDERER,ELECTRON -c green,blue \"npm:dev:renderer\" \"npm:dev:electron\"",
+    "dev:renderer": "webpack --mode development --watch",
+    "dev:electron": "wait-on dist/index.html && cross-env NODE_ENV=development electron .",
+    "dev:electron:inspect": "wait-on dist/index.html && cross-env NODE_ENV=development ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 electron --inspect=9229 . --remote-debugging-port=9222",
+    "start": "electron .",
+    "build": "cross-env NODE_ENV=production webpack",
+    "prepack": "node scripts/make-ico.js src/images/SWS_Logo_512.png public/icon.ico",
+    "pack": "npm run prepack && electron-builder --dir",
+    "dist": "npm run prepack && electron-builder -w",
+    "release": "npm run build && npm run dist",
+    "dist:portable": "npm run build && npm run prepack && electron-builder -w portable"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "7zip-bin": "^5.2.0",
+    "adm-zip": "^0.5.16",
+    "electron-updater": "^6.8.3",
+    "extract-zip": "^2.0.1",
+    "fs-extra": "^11.1.1",
+    "jszip": "^3.10.1",
+    "keytar": "^7.9.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-icons": "^5.5.0"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.22.5",
+    "@babel/preset-env": "^7.22.5",
+    "@babel/preset-react": "^7.22.5",
+    "babel-loader": "^9.1.2",
+    "concurrently": "^8.2.2",
+    "cross-env": "^7.0.3",
+    "css-loader": "^7.1.4",
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3",
+    "html-webpack-plugin": "^5.6.3",
+    "png-to-ico": "^3.0.1",
+    "style-loader": "^4.0.0",
+    "wait-on": "^7.2.0",
+    "webpack": "^5.0.0",
+    "webpack-cli": "^5.0.0"
+  },
+  "build": {
+    "appId": "com.simworksstudios.installer",
+    "productName": "SWS Installer",
+    "artifactName": "SWS-Installer-${version}-Setup.${ext}",
+    "publish": {
+      "provider": "github",
+      "owner": "JGP1992",
+      "repo": "sws-installer"
+    },
+    "files": [
+      "dist/**",
+      "main.js",
+      "preload.js",
+      "src/images/**",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "downloads",
+        "to": "downloads",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "buildResources": "public",
+      "output": "release"
+    },
+    "win": {
+      "publisherName": [
+        "SimWorks Studios"
+      ],
+      "signingHashAlgorithms": [
+        "sha256"
+      ],
+      "rfc3161TimeStampServer": "http://timestamp.digicert.com",
+      "signDlls": true,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        "portable"
+      ],
+      "icon": "public/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "SWS Installer",
+      "uninstallDisplayName": "SWS Installer"
+    }
+  }
+}

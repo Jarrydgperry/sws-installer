@@ -1,0 +1,20 @@
+node_modules/
+dist/
+*.log
+.env
+.DS_Store
+*.tmp
+
+# Electron build outputs
+release/
+release/**
+
+# Generated bundles and source maps (we bundle to dist/; these in public are legacy)
+public/bundle*.js
+public/*.map
+
+# Local caches and demo assets not needed in repo
+downloads/
+packages/
+
+

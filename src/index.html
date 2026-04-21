@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- Meta CSP mirrors the runtime header CSP (keep in sync with main.js).  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: file: https://sws-installer.b-cdn.net; font-src 'self' data: https://fonts.gstatic.com; connect-src 'self' https:; object-src 'none'; frame-src 'none'; base-uri 'self'"> 
+  <title>Simworks Studios Installer</title>
+  <link rel="icon" type="image/png" href="./images/SWS_Logo_512.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+      scroll-behavior: smooth;
+      overflow: hidden; /* Hide window scrollbar */
+  }
+    body {
+      font-family: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+    
+    /* Custom scrollbar for all scrollable areas */
+    ::-webkit-scrollbar {
+      width: 10px;
+      background: #23272b;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #4c5f9d;
+      border-radius: 6px;
+    }
+    /* For Firefox */
+    * {
+      scrollbar-width: thin;
+      scrollbar-color: #4c5f9d #23272b;
+    }
+    @keyframes bannerStatusFadeOut {
+      0% { opacity: 1; }
+      80% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+    .status-ellipsis::after {
+      content: '';
+      display: inline-block;
+      width: 1em;
+      text-align: left;
+      animation: ellipsis steps(4,end) 1.2s infinite;
+    }
+    @keyframes ellipsis {
+      0% { content: ''; }
+      25% { content: '.'; }
+      50% { content: '..'; }
+      75% { content: '...'; }
+      100% { content: ''; }
+    }
+  </style>
+</head>
+<body style="background:#111; color:#eee; font-family: 'Inter', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', 'Liberation Sans', system-ui, -apple-system, sans-serif;">
+
+  <div id="root"></div>
+  <script src="bundle.js"></script>
+
+ 
+</body>
+</html>
