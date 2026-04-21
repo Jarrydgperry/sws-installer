@@ -11005,7 +11005,7 @@ const lastProgressRef = useRef({ value: 0, ts: 0 });
                   if (k && k.startsWith('sws_betaAck_')) keys.push(k);
                 }
                 keys.forEach(k => localStorage.removeItem(k));
-                setStatus(keys.length > 0 ? 'Beta consent cleared. You will be prompted again before downloading any beta.' : 'No beta consent found to clear.');
+                setStatus(keys.length > 0 ? 'Beta consent cleared. You will be prompted again before the next beta install.' : 'No beta consent found to clear.');
               } catch (e) {
                 setStatus('Could not clear beta consent: ' + (e?.message || String(e)));
               }
