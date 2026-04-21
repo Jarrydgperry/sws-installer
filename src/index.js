@@ -6231,17 +6231,16 @@ function OwnedAircraftCard({
                     style={{
                       width:'100%', boxSizing:'border-box',
                       aspectRatio:'1', 
-                      background: gearEnabled ? '#232b32' : '#1a1f24',
+                      background: gearEnabled ? '#232b32' : '#4b535c',
                       color:'#fff',
-                      border:'none',
+                      border: gearEnabled ? 'none' : '1px solid #636d77',
                       borderRadius:0,
                       display:'flex', alignItems:'center', justifyContent:'center',
                       cursor: gearEnabled ? 'pointer' : 'default',
-                      boxShadow:'none',
-                      opacity: gearEnabled ? 1 : 0.35
+                      boxShadow:'none'
                     }}
                   >
-                    <img src={cogIcon} alt="Settings" style={{ width:40, height:40 }} />
+                    <img src={cogIcon} alt="Settings" style={{ width:40, height:40, filter: gearEnabled ? 'none' : 'grayscale(1) brightness(0.82)' }} />
                   </button>
                   </div>
                   {/* Changelog above download */}
