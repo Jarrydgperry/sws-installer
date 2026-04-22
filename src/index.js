@@ -2333,7 +2333,12 @@ function OwnedAircraftCard({
   // Also skip cache hit if the remote version is newer than what's cached (update scenario)
   const cachedVersion = (varRec?.version || existing?.version || '').trim();
   const remoteVersion = (getRemoteVerForSim(simTag) || '').trim();
-  const cacheIsStale = !!(cachedVersion && remoteVersion && compareVersionsNormalized(remoteVersion, cachedVersion) > 0);
+  // Also treat as stale when the cached record has no version at all but we know the remote version;
+  // this forces a re-download for old cache records so main.js can verify via ETag/size.
+  const cacheHasNoVersion = !cachedVersion && !!(varRec?.localPath || existing?.localPath || existing?.baseLocalPath);
+  const cacheIsStale = (cachedVersion && remoteVersion)
+    ? compareVersionsNormalized(remoteVersion, cachedVersion) > 0
+    : !!(cacheHasNoVersion && remoteVersion);
   if ((hasVariantCachedSameChannel) && (!baseZipCached || zipBase(baseZipCached) === zipBase(wantedZip) || hasBaseCached) && !cacheIsStale) {
   if (cancelRequestedRef.current) {
   earlyExit('Download canceled');
@@ -2691,7 +2696,12 @@ function OwnedAircraftCard({
       // Check if existing cache is stale (remote version newer than cached version)
       const existingVer = (existing?.version || '').trim();
       const remoteVer = (getRemoteVerForSim(simTag) || '').trim();
-      const existingIsStale = !!(existingVer && remoteVer && compareVersionsNormalized(remoteVer, existingVer) > 0);
+      // Also treat as stale when the cached record has no version at all but we know the remote version;
+      // this forces a re-download for old cache records so main.js can verify via ETag/size.
+      const existingHasNoVersion = !existingVer && !!(existing?.localPath || existing?.baseLocalPath);
+      const existingIsStale = (existingVer && remoteVer)
+        ? compareVersionsNormalized(remoteVer, existingVer) > 0
+        : !!(existingHasNoVersion && remoteVer);
 
       // Create ordered items: base first (if needed), then each variant not cached on same channel
       const items = [];

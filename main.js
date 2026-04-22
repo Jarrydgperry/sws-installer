@@ -657,6 +657,18 @@ async function downloadToDownloadsWithResume(event, { url, relPath, encryptAtRes
     startSize = 0;
   }
 
+  // If the server reports different content (new ETag or Last-Modified) compared to what was
+  // saved when the file was last downloaded, delete the completed zip so it gets re-fetched.
+  // This prevents installing a stale cached version when the CDN publishes a new build under
+  // the same filename.
+  const serverContentChanged =
+    (!!etag && !!meta.etag && etag !== meta.etag) ||
+    (!!lastModified && !!meta.lastModified && lastModified !== meta.lastModified);
+  if (serverContentChanged) {
+    try { await fs.promises.unlink(finalPath); } catch {}
+    debugLog('INFO', 'Download: server content changed, invalidating cached zip', { file: path.basename(relPath) });
+  }
+
   // Persist current meta (no URL stored to avoid exposing CDN links)
   meta.etag = etag; meta.lastModified = lastModified; meta.total = total;
   await fs.promises.writeFile(metaPath, JSON.stringify({ etag: meta.etag, lastModified: meta.lastModified, total: meta.total }));
