@@ -204,7 +204,7 @@
   ```json
   {
     "productId": "12345",
-    "productName": "Diamond DA40",
+    "productName": "kodiak-100",
     "variant": "G1000",
     "downloadedAt": "2026-04-22T10:30:00Z",
     "localPath": "C:/Users/.../Downloads/sws_da40_v2.1.0.zip",
