@@ -20,4 +20,7 @@ packages/
 # Backup/scratch files
 prev_*.js
 
+# Local handoff notes
+ARCHITECTURE.md
+
 
