@@ -19,11 +19,10 @@ import '@fontsource/inter/700.css';
 // -- Electron bridge typing and mock (for browser dev) --
 
 // ----- WP API base URL (configurable) -----
-// Default to production; allow override via localStorage 'sws_wp_base_url' or env SWS_WP_BASE_URL
-// In a dev build (SWS_ENV=development injected by webpack) the DEV_WP_BASE_URL constant below
-// is used as the default instead of the live production site.
+// True when built with SWS_ENV=development (npm run build:dev) — shows the DEV BUILD badge in the sidebar
 const _IS_DEV_BUILD = (process.env.SWS_ENV === 'development');
-const DEV_WP_BASE_URL = 'https://www.simworksstudios.com'; // replace with staging URL if you have one
+
+// Default to production; allow override via localStorage 'sws_wp_base_url' or env SWS_WP_BASE_URL
 const WP_BASE_URL = (() => {
   try {
     const ls = localStorage.getItem('sws_wp_base_url');
@@ -33,8 +32,6 @@ const WP_BASE_URL = (() => {
     const env = (window?.process?.env?.SWS_WP_BASE_URL) || '';
     if (env && /^https?:\/\//i.test(env)) return String(env).replace(/\/$/, '');
   } catch {}
-  // In a dev build fall back to the dev base URL; otherwise use production
-  if (_IS_DEV_BUILD) return DEV_WP_BASE_URL;
   return 'https://www.simworksstudios.com';
 })();
 
