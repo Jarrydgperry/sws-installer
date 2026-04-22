@@ -10,12 +10,15 @@
     "dev:electron": "wait-on dist/index.html && cross-env NODE_ENV=development electron .",
     "dev:electron:inspect": "wait-on dist/index.html && cross-env NODE_ENV=development ELECTRON_ENABLE_LOGGING=1 ELECTRON_ENABLE_STACK_DUMPING=1 electron --inspect=9229 . --remote-debugging-port=9222",
     "start": "electron .",
-    "build": "cross-env NODE_ENV=production webpack",
+    "build": "cross-env NODE_ENV=production SWS_ENV=production webpack",
+    "build:dev": "cross-env NODE_ENV=production SWS_ENV=development webpack",
+    "build:prod": "cross-env NODE_ENV=production SWS_ENV=production webpack",
     "prepack": "node scripts/make-ico.js src/images/SWS_Logo_512.png public/icon.ico",
     "pack": "npm run prepack && electron-builder --dir",
     "dist": "npm run prepack && electron-builder -w",
-    "release": "npm run build && npm run dist",
-    "dist:portable": "npm run build && npm run prepack && electron-builder -w portable"
+    "release": "npm run build:prod && npm run dist",
+    "release:dev": "npm run build:dev && npm run prepack && electron-builder -w",
+    "dist:portable": "npm run build:prod && npm run prepack && electron-builder -w portable"
   },
   "dependencies": {
     "@fontsource/inter": "^5.2.8",

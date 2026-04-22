@@ -1,8 +1,10 @@
 const path = require('path');
 const HtmlWebpackPlugin = require('html-webpack-plugin');
+const webpack = require('webpack');
 
 // Respect --mode from CLI; default to production for safety
 const mode = process.env.NODE_ENV || 'production';
+const swsEnv = process.env.SWS_ENV || 'production'; // 'development' | 'production'
 
 module.exports = {
   mode,
@@ -31,6 +33,9 @@ module.exports = {
     ]
   },
   plugins: [
+    new webpack.DefinePlugin({
+      'process.env.SWS_ENV': JSON.stringify(swsEnv),
+    }),
     new HtmlWebpackPlugin({
   template: './src/index.html',
   filename: 'index.html',
