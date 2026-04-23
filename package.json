@@ -1,6 +1,6 @@
 {
   "name": "sws-installer",
-  "version": "0.0.18",
+  "version": "0.0.19",
   "description": "SimWorks Studios MSFS Installer",
   "author": "SimWorks Studios",
   "main": "main.js",
