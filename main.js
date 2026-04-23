@@ -975,10 +975,15 @@ async function downloadToDownloadsWithResume(
         JSON.stringify({ relPath, base, finalPath, encryptAtRest, context }),
     );
   } catch {}
-  const partPath = finalPath + ".part";
-  const metaPath = finalPath + ".meta.json";
+  // Store .part and .meta.json in a hidden _tmp mirror so the downloads folder
+  // only ever contains clean .zip files and these temp files are never visible
+  // to the user or swept up by "delete installed".
+  const tmpBase = path.join(base, "_tmp");
+  const partPath = path.join(tmpBase, relPath + ".part");
+  const metaPath = path.join(tmpBase, relPath + ".meta.json");
 
   await ensureDir(path.dirname(finalPath));
+  await ensureDir(path.dirname(partPath));
 
   const meta = { etag: "", lastModified: "", total: 0 };
   let startSize = 0;
@@ -2798,10 +2803,13 @@ async function safeClearDownloadsDir() {
     return { success: true };
   }
   for (const ent of entries) {
-    // Only recurse into known SWS bucket subdirectories ('2020', '2024').
+    // Only recurse into known SWS bucket subdirectories ('2020', '2024') and '_tmp'.
     // Root-level files and any other subdirectories are never touched — the user
     // may have stored other content in the same folder.
-    if (ent.isDirectory() && SWS_DL_BUCKET_DIRS.has(ent.name)) {
+    if (
+      ent.isDirectory() &&
+      (SWS_DL_BUCKET_DIRS.has(ent.name) || ent.name === "_tmp")
+    ) {
       const full = path.join(dir, ent.name);
       await safeClearSubdir(full);
       // Remove the bucket dir itself if now empty
