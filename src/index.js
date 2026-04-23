@@ -1625,11 +1625,12 @@ function OwnedAircraftCard({
       // Use LS cache immediately to reduce flicker
       const ls = readBetaLs(pid);
       const nowTs = Date.now();
-      if (ls && (nowTs - (ls.ts || 0)) < (ls.anyTrue ? 10*60*1000 : 30*60*1000)) {
-        if (!cancelled) setBetaAvailable({ '2020': !!ls.v2020, '2024': !!ls.v2024 });
-        if (ls.anyTrue) return; // good enough, skip background probe
-        // Negative result cached for 30min — skip probing entirely
-        return;
+      if (ls && (nowTs - (ls.ts || 0)) < (ls.anyTrue ? 10*60*1000 : 5*60*1000)) {
+        // Only positive cache should affect immediate UI state.
+        if (ls.anyTrue) {
+          if (!cancelled) setBetaAvailable({ '2020': !!ls.v2020, '2024': !!ls.v2024 });
+          return;
+        }
       }
       // try cache (true results cached longer than false)
       try {
@@ -1640,8 +1641,10 @@ function OwnedAircraftCard({
           const hasTrue = !!(cached.v2020 || cached.v2024);
           const ttl = hasTrue ? 5 * 60 * 1000 : 10 * 60 * 1000;
           if (now - (cached.ts || 0) < ttl) {
-            if (!cancelled) setBetaAvailable({ '2020': !!cached.v2020, '2024': !!cached.v2024 });
-            return;
+            if (hasTrue) {
+              if (!cancelled) setBetaAvailable({ '2020': !!cached.v2020, '2024': !!cached.v2024 });
+              return;
+            }
           }
         }
       } catch {}
@@ -1650,7 +1653,11 @@ function OwnedAircraftCard({
           // Check warm cache first — preheat may have already probed this Beta URL
           const warmKey = `${pid}:FS${simKey}:Beta`;
           if (warmKey in (window.__swsVersionWarmCache || {})) {
-            return !!(window.__swsVersionWarmCache[warmKey] || '').trim();
+            const warmVal = (window.__swsVersionWarmCache[warmKey] || '').trim();
+            // Only trust the warm cache as a negative if it was explicitly marked as a confirmed 404
+            // (non-empty string = version found = positive; empty string = not yet fetched or unknown)
+            if (warmVal) return true;
+            // Empty string: don't short-circuit — fall through to live HEAD probe
           }
           // Use product-aware bucket routing so FS2024-only products check the correct bucket
           const bucket = cdnBucketForSim(product, simKey);
@@ -1702,7 +1709,11 @@ function OwnedAircraftCard({
         try {
           const key = String(product?.id || product?.bunny?.folder || '');
           betaProbeCache.current.set(key, { v2020: b2020, v2024: b2024, ts: Date.now() });
-          writeBetaLs(pid, { v2020: b2020, v2024: b2024, anyTrue: !!(b2020 || b2024), ts: Date.now() });
+          if (b2020 || b2024) {
+            writeBetaLs(pid, { v2020: b2020, v2024: b2024, anyTrue: true, ts: Date.now() });
+          } else {
+            try { localStorage.removeItem(betaLsKey(pid)); } catch {}
+          }
           try { localStorage.setItem(`sws_betaProbeLog_${pid}`, JSON.stringify({ ts: Date.now(), urls: probeLog.slice(0,60) })); } catch {}
         } catch {}
       }
@@ -1756,7 +1767,11 @@ function OwnedAircraftCard({
   const isGa8 = [52157, 2157, 52385, 53069, 54056].includes(Number(product?.id));
   // Allow list: products that may briefly need probe-visible Beta toggle (e.g., historically had Beta but CDN slow)
   const ALLOW_PROBE_VISIBLE = new Set([
-    33812, // PC-12 (ensure user sees Beta option early while probing)
+    33812, // PC-12
+    33808, // Kodiak 100 Wheels (FS2020+)
+    33810, // Kodiak 100 Amphibian (FS2020+)
+    54059, // Kodiak 100 Wheels (FS2024 native)
+    54058, // Kodiak 100 Amphibian (FS2024 native)
   ]);
   // Allow forcing visibility via localStorage (debug) and include active probe state so it doesn't "disappear" while probing
   let forceBetaToggle = false;
@@ -2549,7 +2564,7 @@ function OwnedAircraftCard({
     }
     const variantUrl = await resolveZipUrl(simKey, 'Beta', wantedZip, { isVariant: true });
   if (cancelRequestedRef.current) { earlyExit('Download canceled'); return; }
-      if (!variantUrl) { earlyExit('Beta build not available for this variant/sim.'); return; }
+      if (!variantUrl) { earlyExit(`Beta build not available for this variant/sim. (pid:${product?.id || 'n/a'} sim:${simTag} channel:Beta zip:${wantedZip || 'n/a'})`); return; }
       const inferredZip = variantUrl.split('/').pop().split('?')[0] || wantedZip;
       onStatus?.(`Downloading ${wantedComponentLabel || wantedLabel} (${simTag}) [Beta] — ${inferredZip}`);
     // Record the intended variant zip (wantedZip) even if the file name differs
@@ -2576,7 +2591,7 @@ function OwnedAircraftCard({
   let baseLocalPath = '';
   // Resolve variant URL using shared resolver (supports overrides and cross-sim fallback)
   const variantUrlPublic = await resolveZipUrl(simKey, 'Public', wantedZip, { isVariant: true });
-  if (!variantUrlPublic) { earlyExit('Download not available for this selection.'); return; }
+  if (!variantUrlPublic) { earlyExit(`Download not available for this selection. (pid:${product?.id || 'n/a'} sim:${simTag} channel:Public zip:${wantedZip || 'n/a'})`); return; }
 
   if (baseZip && baseZip !== wantedZip && !hasBaseCached) {
     const baseUrlPublic = await resolveZipUrl(simKey, 'Public', baseZip, { isVariant: false });
@@ -2620,7 +2635,7 @@ function OwnedAircraftCard({
   const saved = await handleDownload(product, variantUrlPublic, simTag, 'Public', '', inferredZip);
       if (saved) { variantLocalPath = saved; }
   if (cancelRequestedRef.current) { earlyExit('Download canceled'); setSuppressReadyBySim(prev => ({ ...prev, [simTag]: true })); return; }
-      if (!variantLocalPath) { earlyExit('Download not available for this selection.'); return; }
+      if (!variantLocalPath) { earlyExit(`Download not available for this selection. (pid:${product?.id || 'n/a'} sim:${simTag} channel:Public zip:${wantedZip || 'n/a'})`); return; }
   if (cancelRequestedRef.current) { earlyExit('Download canceled'); setSuppressReadyBySim(prev => ({ ...prev, [simTag]: true })); return; }
   if (cancelRequestedRef.current) { earlyExit('Download canceled'); setSuppressReadyBySim(prev => ({ ...prev, [simTag]: true })); return; }
   earlyExit('Download complete. Ready to install.');
@@ -2813,7 +2828,7 @@ function OwnedAircraftCard({
             saved = await handleDownload(product, baseUrl, simTag, chan, '', '__BASE_ONLY__');
           } else {
             const vUrl = await resolveZipUrl(simKey, chan, it.zip, { isVariant: true });
-            if (!vUrl) { onStatus?.('Variant not available for this sim/channel.'); break; }
+            if (!vUrl) { onStatus?.(`Variant not available for this sim/channel. (pid:${product?.id || 'n/a'} sim:${simTag} channel:${chan} zip:${it.zip || 'n/a'})`); break; }
             const inferredZip = vUrl.split('/').pop().split('?')[0] || it.zip;
             if (cancelRequestedRef.current) break;
             onStatus?.(`Downloading ${componentLabelForZip(product, it.zip)} (${simTag}) [${chan}] — ${inferredZip}${attempt > 0 ? ` (retry ${attempt})` : ''}`);
@@ -4876,20 +4891,17 @@ function OwnedAircraftCard({
 
       for (const u of urls) {
         try {
-          // Use headOk-style negative caching to avoid re-probing known-404 URLs
-          const negTs = __headNegCache.get(u);
-          if (negTs && (Date.now() - negTs) < HEAD_NEG_TTL) continue;
           if (window?.electron?.netHead) {
-            const res = await window.electron.netHead(addCacheBust(u));
-            if (!res || !res.ok) { __headNegCache.set(u, Date.now()); continue; }
+            const res = await window.electron.netHead(u);
+            if (!res || !res.ok) continue;
             return {
               etag: res.etag || '',
               lm: res.lastModified || '',
               len: String(res.contentLength || '')
             };
           } else {
-            const r = await fetch(addCacheBust(u), { method: 'HEAD', cache: 'no-store' });
-            if (!r.ok) { __headNegCache.set(u, Date.now()); continue; }
+            const r = await fetch(u, { method: 'HEAD', cache: 'no-store' });
+            if (!r.ok) continue;
             return {
               etag: r.headers.get('ETag') || '',
               lm: r.headers.get('Last-Modified') || '',
@@ -11937,28 +11949,19 @@ function addCacheBust(u) {
     return u;
   }
 }
-// Session-level negative cache for HEAD probes to avoid re-hitting known-404 URLs
-const __headNegCache = new Map(); // url -> timestamp
-const HEAD_NEG_TTL = 30 * 60 * 1000; // 30 minutes
 // Quick existence check for download URLs (with timeout)
 async function headOk(url, timeoutMs = 4500) {
-  // Check negative cache first
-  const negTs = __headNegCache.get(url);
-  if (negTs && (Date.now() - negTs) < HEAD_NEG_TTL) return false;
   try {
-  const h = await fetchWithTimeout(addCacheBust(url), { method: 'HEAD', cache: 'no-store' }, timeoutMs);
+  const h = await fetchWithTimeout(url, { method: 'HEAD', cache: 'no-store' }, timeoutMs);
     if (h.ok) return true;
-    // HEAD returned non-ok (404/403) — cache this negative result; skip GET Range fallback
-    __headNegCache.set(url, Date.now());
-    return false;
+    // Non-ok HEAD; fall through to GET Range fallback for hosts that restrict HEAD.
   } catch {}
   // Network error (timeout, DNS, etc.) — try GET Range as last resort
   try {
-  const g = await fetchWithTimeout(addCacheBust(url), { method: 'GET', cache: 'no-store', headers: { 'Range': 'bytes=0-0' } }, Math.max(timeoutMs, 6000));
+  const g = await fetchWithTimeout(url, { method: 'GET', cache: 'no-store', headers: { 'Range': 'bytes=0-0' } }, Math.max(timeoutMs, 6000));
     if (g.ok) return true;
-    __headNegCache.set(url, Date.now());
     return false;
-  } catch { __headNegCache.set(url, Date.now()); return false; }
+  } catch { return false; }
 }
 // ZIP helpers
 function _zipStem(name) {
