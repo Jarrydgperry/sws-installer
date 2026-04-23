@@ -2910,24 +2910,39 @@ ipcMain.handle("pkg-cache:find-extract-dir", async (_e, { folder } = {}) => {
     if (!name) throw new Error("Missing folder");
     const root = getPkgCacheDir();
     await fs.promises.mkdir(root, { recursive: true }).catch(() => {});
-    const entries = await fs.promises
-      .readdir(root, { withFileTypes: true })
-      .catch(() => []);
     const candidates = [];
-    for (const ent of entries) {
-      if (!ent.isDirectory()) continue;
-      const base = ent.name;
-      const full = path.join(root, base, name);
+    // Recursively walk the pkg-cache tree (up to maxDepth) looking for a
+    // directory whose name matches `name`. The cache layout is multi-level:
+    //   pkg-cache/<bucket>/<channel>/<bunny-folder>/<zipBase>/<AIRCRAFT-FOLDER>/
+    // so a shallow scan would never find anything.
+    const MAX_DEPTH = 6;
+    async function scan(dir, depth) {
+      if (depth > MAX_DEPTH) return;
+      let entries;
       try {
-        const st = await fs.promises.stat(full).catch(() => null);
-        if (st && st.isDirectory()) {
-          // score by mtime of the extracted folder; prefer most recent
-          const mtimeMs = st.mtimeMs || 0;
-          candidates.push({ full, mtimeMs });
+        entries = await fs.promises.readdir(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const ent of entries) {
+        if (!ent.isDirectory()) continue;
+        const full = path.join(dir, ent.name);
+        if (ent.name === name) {
+          try {
+            const st = await fs.promises.stat(full).catch(() => null);
+            if (st && st.isDirectory()) {
+              candidates.push({ full, mtimeMs: st.mtimeMs || 0 });
+            }
+          } catch {}
+          // Don't recurse into the matched folder itself
+        } else {
+          await scan(full, depth + 1);
         }
-      } catch {}
+      }
     }
+    await scan(root, 0);
     if (!candidates.length) return { success: false, error: "Not found" };
+    // Prefer the most recently modified match
     candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
     return { success: true, extractRoot: candidates[0].full };
   } catch (err) {
