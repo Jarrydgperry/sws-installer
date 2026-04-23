@@ -7182,7 +7182,7 @@ function OwnedAircraftCard({
         if (rawFolder) {
           // Try the preferred bucket first; other bucket is a fallback in the folder loop below
           const directUrl = addCacheBust(
-            `https://sws-installer.b-cdn.net/${preferred}/${chPrimary}/${rawFolder}/manifest.json`,
+            `https://sws-installer.b-cdn.net/${preferred}/${chPrimary}/${encodePathSegments(rawFolder)}/manifest.json`,
           );
           if (attemptedUrls) attemptedUrls.push(directUrl);
           const v = await readVersionFromUrl(directUrl, "DirectRaw");
@@ -7287,7 +7287,7 @@ function OwnedAircraftCard({
         if (!folders.length) return "";
         const sk = cdnBucketForSim(product, simTag.replace("FS", ""));
         for (const folder of folders) {
-          const url = `https://sws-installer.b-cdn.net/${sk}/${channel}/${folder}/manifest.json`;
+          const url = `https://sws-installer.b-cdn.net/${sk}/${channel}/${encodePathSegments(folder)}/manifest.json`;
           const r = await fetch(url, { cache: "no-store" });
           if (!r.ok) continue;
           const txt = await r.text();
@@ -13028,9 +13028,25 @@ const App = () => {
           beginInitOp();
           setStatus("Preparing versions…");
           // Minimal, fast preheater over canonical manifest.json paths
-          window.__swsVersionWarmCache = window.__swsVersionWarmCache || {};
-          window.__swsManifestEtagCache =
-            window.__swsManifestEtagCache || new Map();
+          // Hydrate warm caches from sessionStorage so a page reload within the same
+          // browser session doesn't re-fetch every manifest (zero origin hits on reload).
+          if (!window.__swsVersionWarmCache) {
+            try {
+              const saved = sessionStorage.getItem("sws_versionWarmCache");
+              window.__swsVersionWarmCache = saved ? JSON.parse(saved) : {};
+            } catch {
+              window.__swsVersionWarmCache = {};
+            }
+          }
+          if (!window.__swsManifestEtagCache) {
+            try {
+              const saved = sessionStorage.getItem("sws_manifestEtagCache");
+              const arr = saved ? JSON.parse(saved) : [];
+              window.__swsManifestEtagCache = new Map(Array.isArray(arr) ? arr : []);
+            } catch {
+              window.__swsManifestEtagCache = new Map();
+            }
+          }
           window.__swsChangelogWarmCache = window.__swsChangelogWarmCache || {};
           const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
           const allSims = ["2020", "2024"];
@@ -13127,14 +13143,20 @@ const App = () => {
             try {
               const warmKey = `${task.prodId}:${task.simTag}:${task.channel}`;
               if (warmKey in window.__swsVersionWarmCache) return;
+              // Use ETag conditional request: if Bunny returns 304 the CDN edge serves it
+              // with no origin hit and no bandwidth. Only re-fetch when content changed.
+              const cached = window.__swsManifestEtagCache?.get(task.url);
+              const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
               let ok = false,
                 text = "",
-                etag = "";
+                etag = "",
+                status = 0;
               if (window?.electron?.netFetchText) {
-                const res = await window.electron.netFetchText(
-                  task.url + `?_=${cdnCacheBucket()}`,
-                  { timeoutMs: 8000 },
-                );
+                const res = await window.electron.netFetchText(task.url, {
+                  timeoutMs: 8000,
+                  headers: reqHeaders,
+                });
+                status = res?.status || 0;
                 ok = !!(res && res.ok);
                 text = res?.text || "";
                 etag =
@@ -13142,12 +13164,21 @@ const App = () => {
                     (res.headers["etag"] || res.headers["ETag"])) ||
                   "";
               } else {
-                const r = await fetch(task.url + `?_=${cdnCacheBucket()}`, {
-                  cache: "no-store",
+                const r = await fetch(task.url, {
+                  cache: "no-cache",
+                  headers: reqHeaders,
                 });
+                status = r.status;
                 ok = r.ok;
                 text = ok ? await r.text() : "";
                 etag = ok ? r.headers.get("ETag") || "" : "";
+              }
+              // 304 Not Modified — content unchanged, reuse cached version
+              if (status === 304 && cached?.version) {
+                window.__swsVersionWarmCache[warmKey] = cached.version;
+                if (task.extraWarmKeys)
+                  task.extraWarmKeys.forEach((k) => { window.__swsVersionWarmCache[k] = window.__swsVersionWarmCache[k] || cached.version; });
+                return;
               }
               // Populate extra warm keys (for 2020+ products, one fetch covers both FS2020 and FS2024)
               const _setWarm = (key, val) => {
@@ -13373,6 +13404,24 @@ const App = () => {
           // Mark preheat as done so the global preheater effect doesn't repeat the same work
           try {
             window.__swsPreheatToken = token;
+          } catch {}
+          // Persist warm caches to sessionStorage so page reloads within the same
+          // session skip all manifest fetches entirely.
+          try {
+            sessionStorage.setItem(
+              "sws_versionWarmCache",
+              JSON.stringify(window.__swsVersionWarmCache || {}),
+            );
+          } catch {}
+          try {
+            sessionStorage.setItem(
+              "sws_manifestEtagCache",
+              JSON.stringify(
+                Array.from(
+                  (window.__swsManifestEtagCache || new Map()).entries(),
+                ),
+              ),
+            );
           } catch {}
         } catch {
         } finally {
@@ -13667,10 +13716,24 @@ const App = () => {
         if (window.__swsPreheatToken === token) return;
         window.__swsPreheatToken = token;
 
-        // Prepare caches
-        window.__swsVersionWarmCache = window.__swsVersionWarmCache || {};
-        window.__swsManifestEtagCache =
-          window.__swsManifestEtagCache || new Map();
+        // Prepare caches — hydrate from sessionStorage on first use
+        if (!window.__swsVersionWarmCache) {
+          try {
+            const saved = sessionStorage.getItem("sws_versionWarmCache");
+            window.__swsVersionWarmCache = saved ? JSON.parse(saved) : {};
+          } catch {
+            window.__swsVersionWarmCache = {};
+          }
+        }
+        if (!window.__swsManifestEtagCache) {
+          try {
+            const saved = sessionStorage.getItem("sws_manifestEtagCache");
+            const arr = saved ? JSON.parse(saved) : [];
+            window.__swsManifestEtagCache = new Map(Array.isArray(arr) ? arr : []);
+          } catch {
+            window.__swsManifestEtagCache = new Map();
+          }
+        }
 
         const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
         const allSims = ["2020", "2024"];
@@ -13755,15 +13818,19 @@ const App = () => {
             // Skip if already warmed
             const warmKey = `${task.prodId}:${task.simTag}:${task.channel}`;
             if (window.__swsVersionWarmCache[warmKey]) return;
-            // Prefer main process fetch
+            // ETag conditional request — 304 means content unchanged, reuse cached version
+            const cached = window.__swsManifestEtagCache?.get(task.url);
+            const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
             let ok = false,
               text = "",
-              etag = "";
+              etag = "",
+              status = 0;
             if (window?.electron?.netFetchText) {
-              const res = await window.electron.netFetchText(
-                task.url + `?_=${cdnCacheBucket()}`,
-                { timeoutMs: 8000 },
-              );
+              const res = await window.electron.netFetchText(task.url, {
+                timeoutMs: 8000,
+                headers: reqHeaders,
+              });
+              status = res?.status || 0;
               ok = !!(res && res.ok);
               text = res?.text || "";
               etag =
@@ -13771,12 +13838,19 @@ const App = () => {
                   (res.headers["etag"] || res.headers["ETag"])) ||
                 "";
             } else {
-              const r = await fetch(task.url + `?_=${cdnCacheBucket()}`, {
-                cache: "no-store",
+              const r = await fetch(task.url, {
+                cache: "no-cache",
+                headers: reqHeaders,
               });
+              status = r.status;
               ok = r.ok;
               text = ok ? await r.text() : "";
               etag = ok ? r.headers.get("ETag") || "" : "";
+            }
+            // 304 Not Modified — reuse cached version, no parse needed
+            if (status === 304 && cached?.version) {
+              window.__swsVersionWarmCache[warmKey] = cached.version;
+              return;
             }
             if (!ok) return;
             const ver = parseVer(text);
@@ -18158,7 +18232,9 @@ function buildCdnUrls(simKey, channel, folder, file) {
         ? "Public"
         : channel;
   const sk = String(simKey || "").trim() || "2020"; // '2020' | '2024'
-  return [`https://sws-installer.b-cdn.net/${sk}/${ch}/${folder}/${file}`];
+  const f = encodePathSegments(String(folder || ""));
+  const fi = encodeURIComponent(String(file || ""));
+  return [`https://sws-installer.b-cdn.net/${sk}/${ch}/${f}/${fi}`];
 }
 
 // Some existing CDN layouts place the product folder first, then sim, then channel.
@@ -18172,7 +18248,9 @@ function buildCdnUrlsProductFirst(simKey, channel, folder, file) {
         ? "Public"
         : channel;
   const sk = String(simKey || "").trim() || "2020";
-  return [`https://sws-installer.b-cdn.net/${folder}/${sk}/${ch}/${file}`];
+  const f = encodePathSegments(String(folder || ""));
+  const fi = encodeURIComponent(String(file || ""));
+  return [`https://sws-installer.b-cdn.net/${f}/${sk}/${ch}/${fi}`];
 }
 
 // Decide which CDN bucket to use for a given sim/product.
@@ -18250,7 +18328,7 @@ function buildCdnUrlsNoFolder(simKey, channel, file) {
         ? "Public"
         : channel;
   const sk = String(simKey || "").trim() || "2020";
-  return [`https://sws-installer.b-cdn.net/${sk}/${ch}/${file}`];
+  return [`https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(String(file || ""))}`];
 }
 
 const manifestZipHintsCache = new Map();
