@@ -1659,25 +1659,38 @@ function OwnedAircraftCard({
             if (warmVal) return true;
             // Empty string: don't short-circuit — fall through to live HEAD probe
           }
-          // Use product-aware bucket routing so FS2024-only products check the correct bucket
+          // Use product-aware bucket routing, but when checking FS2024 allow probing the
+          // 2024 bucket as fallback because some Beta assets are only published there.
           const bucket = cdnBucketForSim(product, simKey);
-          // Try canonical folder only (not all candidates) to minimize 4xx requests
-          const folder = product?.bunny?.folder ? encodePathSegments(product.bunny.folder) : '';
-          if (!folder) return false;
-          const url = `https://sws-installer.b-cdn.net/${bucket}/Beta/${folder}/manifest.json?_=${cdnCacheBucket()}`;
-          try {
-            // Use main-process IPC to bypass CORS restrictions on renderer-side fetch
-            if (window?.electron?.netHead) {
-              const res = await window.electron.netHead(url);
-              if (res && res.ok) return true;
-            } else if (window?.electron?.netFetchText) {
-              const res = await window.electron.netFetchText(url, { method: 'HEAD', timeoutMs: 4000 });
-              if (res && res.ok) return true;
-            } else {
-              const ok = await fetchWithTimeout(url, { method: 'HEAD', cache: 'no-store' }, 3000).then(r => r.ok).catch(() => false);
-              if (ok) return true;
+          const buckets = [bucket];
+          if (String(simKey) === '2024' && bucket !== '2024') buckets.push('2024');
+          // Probe canonical folder plus compact base-folder candidates to handle CDN naming
+          // variants like SWS-AIRCRAFT-KODIAK-WHEELS.
+          const canonicalFolder = product?.bunny?.folder ? encodePathSegments(product.bunny.folder) : '';
+          const folderCandidates = [
+            canonicalFolder,
+            ...cdnBaseFolderCandidates(product)
+          ].filter(Boolean);
+          const folders = Array.from(new Set(folderCandidates)).slice(0, 8);
+          if (!folders.length) return false;
+          for (const b of buckets) {
+            for (const folder of folders) {
+              const url = `https://sws-installer.b-cdn.net/${b}/Beta/${folder}/manifest.json?_=${cdnCacheBucket()}`;
+              try {
+                // Use main-process IPC to bypass CORS restrictions on renderer-side fetch
+                if (window?.electron?.netHead) {
+                  const res = await window.electron.netHead(url);
+                  if (res && res.ok) return true;
+                } else if (window?.electron?.netFetchText) {
+                  const res = await window.electron.netFetchText(url, { method: 'HEAD', timeoutMs: 4000 });
+                  if (res && res.ok) return true;
+                } else {
+                  const ok = await fetchWithTimeout(url, { method: 'HEAD', cache: 'no-store' }, 3000).then(r => r.ok).catch(() => false);
+                  if (ok) return true;
+                }
+              } catch {}
             }
-          } catch {}
+          }
           return false;
         } catch { return false; }
       }
@@ -1784,8 +1797,16 @@ function OwnedAircraftCard({
     const hist = readBetaLs(String(product?.id || product?.bunny?.folder || ''));
     if (hist && Date.now() - (hist.ts || 0) < 12*60*60*1000 && (hist.anyTrue || hist.v2020 || hist.v2024)) betaHistoryRecent = true;
   } catch {}
-  const betaToggleVisible = isBetaTester && (
-    betaExists || anyInstalledBeta || betaProductChecked || hasBetaCache || betaHistoryRecent || forceBetaToggle || ((isGa8 || ALLOW_PROBE_VISIBLE.has(Number(product?.id))) && betaChecking)
+  const betaEntitled = (
+    isBetaTester ||
+    forceBetaToggle ||
+    hasBetaCache ||
+    betaHistoryRecent ||
+    getChan('FS2020') === 'Beta' ||
+    getChan('FS2024') === 'Beta'
+  );
+  const betaToggleVisible = betaEntitled && (
+    isBetaTester || betaExists || anyInstalledBeta || betaProductChecked || hasBetaCache || betaHistoryRecent || forceBetaToggle || ((isGa8 || ALLOW_PROBE_VISIBLE.has(Number(product?.id))) && betaChecking)
   );
   if (window.__SWS_DEBUG_GLOBAL) {
     try {
@@ -2498,6 +2519,14 @@ function OwnedAircraftCard({
         // Use product-aware bucket choice: for 2020+ products, this maps 2024 → 2020
         ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKey, channel, f, z)))
       ];
+      // Some FS2024 beta/public artifacts are stored under /2024 even for products marked 2020+.
+      // Probe that bucket as fallback when simKey=2024 and primary mapping picked 2020.
+      if (String(simKey) === '2024' && cdnBucketForSim(product, simKey) !== '2024') {
+        urls.push(
+          ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrls('2024', channel, f, z)))
+        );
+      }
+      urls = Array.from(new Set(urls));
 
       // PC-12 name permutations removed — fetchManifestZipHints already provides the correct zip name
 
@@ -2786,6 +2815,12 @@ function OwnedAircraftCard({
   let urls = [
           ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKeyLocal, channel, f, z)))
         ];
+        if (String(simKeyLocal) === '2024' && cdnBucketForSim(product, simKeyLocal) !== '2024') {
+          urls.push(
+            ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrls('2024', channel, f, z)))
+          );
+        }
+        urls = Array.from(new Set(urls));
         for (const u of urls) { if (await headOk(u, (timeBudget))) return u; }
         // cdnBucketForSim already maps to the correct bucket; no cross-sim fallback needed
         // Last resort: return the first candidate so the main downloader surfaces any HTTP error
