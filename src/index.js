@@ -8320,30 +8320,42 @@ function OwnedAircraftCard({
       for (const se of simEntries) {
         if (!se.inst) continue;
         const folder = se.inst.folder || se.inst.name;
+        // Collect all candidate folder names for this product so we can find
+        // the matching entry in the install cache (pkg-cache) reliably.
+        const folderCandidates = new Set();
+        if (folder) folderCandidates.add(folder);
+        const owned = ownedAircraft.find((p) => p.id === product.id);
+        const cleanSeg2 = (s) => String(s || "").split(/[\\/]/).pop();
+        if (owned?.bunny?.folder) folderCandidates.add(cleanSeg2(owned.bunny.folder));
+        if (owned?.bunny?.zip) folderCandidates.add(cleanSeg2(owned.bunny.zip).replace(/\.zip$/i, ""));
+        (owned?.bunny?.altFolders || []).forEach((f) => folderCandidates.add(cleanSeg2(f)));
+
         // Capture extract/cache location BEFORE unlinking
         const extractTargets = new Set();
+        // 1. Resolve the junction target via realpath (works when it's a junction to pkg-cache)
         try {
           if (se.path && folder && window.electron?.getPackageRealPath) {
-            const info = await window.electron.getPackageRealPath(
-              se.path,
-              folder,
-            );
+            const info = await window.electron.getPackageRealPath(se.path, folder);
             const cand = info?.extractRoot || info?.realDir;
-            if (cand) extractTargets.add(cand);
+            // Only use this path if it looks like it's inside the pkg-cache (not just the Community dir itself)
+            if (cand && cand !== info?.linkDir) extractTargets.add(cand);
           }
         } catch {}
-        try {
-          if (window.electron?.findExtractDirForFolder && folder) {
-            const guess = await window.electron.findExtractDirForFolder(folder);
-            if (guess?.success && guess?.extractRoot)
-              extractTargets.add(guess.extractRoot);
-          }
-        } catch {}
+        // 2. Search pkg-cache for each candidate folder name (reliable even for copy installs)
+        for (const cname of folderCandidates) {
+          try {
+            if (window.electron?.findExtractDirForFolder && cname) {
+              const guess = await window.electron.findExtractDirForFolder(cname);
+              if (guess?.success && guess?.extractRoot)
+                extractTargets.add(guess.extractRoot);
+            }
+          } catch {}
+        }
         // Uninstall (unlink from Community)
         try {
           await handleUninstall(se.inst);
         } catch {}
-        // Delete extracted install cache
+        // Delete extracted install cache entries
         for (const targetDir of extractTargets) {
           try {
             if (targetDir && window.electron?.deleteFile)
@@ -17168,7 +17180,7 @@ const App = () => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "160px 1fr auto auto",
+                  gridTemplateColumns: "160px 1fr auto auto auto",
                   alignItems: "center",
                   gap: 12,
                   marginTop: 16,
@@ -17212,7 +17224,7 @@ const App = () => {
                   }}
                   style={{
                     background:
-                      "linear-gradient(135deg, #1e88e5 0%, #1565c0 100%)",
+                      "linear-gradient(135deg, #43a047 0%, #2e7d32 100%)",
                     color: "#fff",
                     border: `1px solid ${SWS_THEME.outline.neutral}`,
                     borderRadius: 0,
@@ -17249,8 +17261,9 @@ const App = () => {
                     }
                   }}
                   style={{
-                    background: "#2b3944",
-                    color: "#dfe7ee",
+                    background:
+                      "linear-gradient(135deg, #1e88e5 0%, #1565c0 100%)",
+                    color: "#fff",
                     border: `1px solid ${SWS_THEME.outline.neutral}`,
                     borderRadius: 0,
                     padding: "8px 12px",
@@ -17259,7 +17272,50 @@ const App = () => {
                   }}
                   title="Open in Explorer"
                 >
-                  Open
+                  Browse
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await waitForElectronBridge();
+                      const proceed = window.confirm(
+                        "This will delete all downloaded ZIPs from the Downloads Folder. You will need to re-download before reinstalling. Continue?",
+                      );
+                      if (!proceed) return;
+                      const res = await window.electron?.clearDownloadsDir?.();
+                      if (res?.success) {
+                        clearAllDlCache();
+                        setDownloadedFiles({});
+                        setStatus("Downloads folder cleared.");
+                      } else {
+                        setStatus(
+                          "Could not clear downloads folder" +
+                            (res?.error ? ": " + res.error : ""),
+                        );
+                      }
+                    } catch (e) {
+                      setStatus(
+                        "Error clearing downloads folder: " +
+                          (e?.message || String(e)),
+                      );
+                    }
+                  }}
+                  style={{
+                    background: "#ed1c24",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 0,
+                    padding: "8px 10px",
+                    cursor: "pointer",
+                    boxShadow: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  title="Delete all downloaded ZIPs from the downloads folder"
+                >
+                  <img src={binIcon} alt="Clear downloads" style={{ width: 16, height: 16 }} />
                 </button>
               </div>
               {/* Downloads folder help text intentionally removed per request */}
@@ -17268,7 +17324,7 @@ const App = () => {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "160px 1fr auto auto",
+                  gridTemplateColumns: "160px 1fr auto auto auto",
                   alignItems: "center",
                   gap: 12,
                   marginTop: 16,
@@ -17310,7 +17366,7 @@ const App = () => {
                   }}
                   style={{
                     background:
-                      "linear-gradient(135deg, #1e88e5 0%, #1565c0 100%)",
+                      "linear-gradient(135deg, #43a047 0%, #2e7d32 100%)",
                     color: "#fff",
                     border: `1px solid ${SWS_THEME.outline.neutral}`,
                     borderRadius: 0,
@@ -17347,8 +17403,9 @@ const App = () => {
                     }
                   }}
                   style={{
-                    background: "#2b3944",
-                    color: "#dfe7ee",
+                    background:
+                      "linear-gradient(135deg, #1e88e5 0%, #1565c0 100%)",
+                    color: "#fff",
                     border: `1px solid ${SWS_THEME.outline.neutral}`,
                     borderRadius: 0,
                     padding: "8px 12px",
@@ -17357,7 +17414,48 @@ const App = () => {
                   }}
                   title="Open in Explorer"
                 >
-                  Open
+                  Browse
+                </button>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await waitForElectronBridge();
+                      const proceed = window.confirm(
+                        "This will delete all extracted packages from the Install Cache Folder. Installed aircraft using junctions will stop working until reinstalled. Continue?",
+                      );
+                      if (!proceed) return;
+                      const res = await window.electron?.clearPkgCache?.();
+                      if (res?.success) {
+                        setStatus("Install cache cleared.");
+                      } else {
+                        setStatus(
+                          "Could not clear install cache" +
+                            (res?.error ? ": " + res.error : ""),
+                        );
+                      }
+                    } catch (e) {
+                      setStatus(
+                        "Error clearing install cache: " +
+                          (e?.message || String(e)),
+                      );
+                    }
+                  }}
+                  style={{
+                    background: "#ed1c24",
+                    color: "#fff",
+                    border: "none",
+                    borderRadius: 0,
+                    padding: "8px 10px",
+                    cursor: "pointer",
+                    boxShadow: "none",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  title="Delete all extracted packages from the install cache folder"
+                >
+                  <img src={binIcon} alt="Clear install cache" style={{ width: 16, height: 16 }} />
                 </button>
               </div>
               {/* Install cache help text intentionally removed per request */}
@@ -17505,45 +17603,6 @@ const App = () => {
                   gap: 12,
                 }}
               >
-                {/* Delete all installed (both sims) and their install cache; keep downloads */}
-                <button
-                  type="button"
-                  onClick={handleDeleteInstalledAll}
-                  style={{
-                    background: "#d32f2f",
-                    color: "#fff",
-                    border: `1px solid ${SWS_THEME.outline.danger}`,
-                    borderRadius: 0,
-                    padding: "10px 16px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    boxShadow: "none",
-                    marginRight: 12,
-                    marginBottom: 8,
-                  }}
-                  title="Uninstall all installed packages from both sims and delete their extracted install cache. Downloaded ZIPs are kept."
-                >
-                  Delete Installed
-                </button>
-                {/* Delete downloads cache (removes ZIPs only) */}
-                <button
-                  type="button"
-                  onClick={handleResetDownloads}
-                  style={{
-                    background: "#6a1b9a",
-                    color: "#fff",
-                    border: `1px solid ${SWS_THEME.outline.neutral}`,
-                    borderRadius: 0,
-                    padding: "10px 16px",
-                    fontWeight: 700,
-                    cursor: "pointer",
-                    boxShadow: "none",
-                    marginBottom: 8,
-                  }}
-                  title="Delete ALL downloaded ZIP archives for every product (safe: installed packages remain, but you'll need to re-download to reinstall/update)."
-                >
-                  Delete downloads cache
-                </button>
                 {/* Withdraw beta consent */}
                 <button
                   type="button"

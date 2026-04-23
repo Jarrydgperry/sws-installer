@@ -1927,7 +1927,22 @@ ipcMain.handle("net:head", async (_e, { url } = {}) => {
 ipcMain.handle("clear-pkg-cache", async () => {
   try {
     const dir = getPkgCacheDir();
-    await fs.promises.rm(dir, { recursive: true, force: true });
+    // Delete contents only — keep the folder itself so subsequent installs
+    // don't have to recreate it and the configured path remains valid.
+    let entries;
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true });
+    } catch {
+      // Folder doesn't exist yet — nothing to clear
+      return { success: true };
+    }
+    await Promise.all(
+      entries.map((ent) =>
+        fs.promises
+          .rm(path.join(dir, ent.name), { recursive: true, force: true })
+          .catch(() => {}),
+      ),
+    );
     return { success: true };
   } catch (err) {
     return { success: false, error: err.message || String(err) };
