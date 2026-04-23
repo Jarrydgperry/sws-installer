@@ -2470,13 +2470,13 @@ function OwnedAircraftCard({
       } catch {}
       // If we know the remote version, prefer candidate ZIP names that contain it.
       // This prevents older legacy ZIP names from winning when both still exist on CDN.
+      // NOTE: Do NOT early-return when no version-matched names exist — most products use static ZIP
+      // filenames (e.g. sws-aircraft-kodiak-wheels.zip) that never contain the version number.
+      // The fallback below handles this correctly by using all candidateNames.
       const remoteVerToken = String(getRemoteVerForSim(simTag) || '').trim();
       const versionMatched = remoteVerToken
         ? candidateNames.filter(n => String(n).includes(remoteVerToken))
         : [];
-      // Strict mode: when we know the remote version, do NOT fall back to legacy/non-versioned names.
-      // This avoids silently downloading older artifacts that still exist on CDN.
-      if (remoteVerToken && versionMatched.length === 0) return '';
       const effectiveCandidateNames = versionMatched.length ? versionMatched : candidateNames;
       let urls = [
         ...directHints,
@@ -2760,13 +2760,13 @@ function OwnedAircraftCard({
         }
         // If we know the remote version, prefer candidate ZIP names that contain it.
         // This prevents older legacy ZIP names from winning when both still exist on CDN.
+        // NOTE: Do NOT early-return when no version-matched names exist — most products use static ZIP
+        // filenames (e.g. sws-aircraft-kodiak-wheels.zip) that never contain the version number.
+        // The fallback below handles this correctly by using all candidateNames.
         const remoteVerToken = String(getRemoteVerForSim(simTag) || '').trim();
         const versionMatched = remoteVerToken
           ? candidateNames.filter(n => String(n).includes(remoteVerToken))
           : [];
-        // Strict mode: when we know the remote version, do NOT fall back to legacy/non-versioned names.
-        // This avoids silently downloading older artifacts that still exist on CDN.
-        if (remoteVerToken && versionMatched.length === 0) return '';
         const effectiveCandidateNames = versionMatched.length ? versionMatched : candidateNames;
   let urls = [
           ...effectiveCandidateNames.flatMap(z => folders.flatMap(f => buildCdnUrlsForProduct(product, simKeyLocal, channel, f, z)))

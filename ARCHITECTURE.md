@@ -92,6 +92,8 @@
 
 ---
 
+
+
 ## Section 3: Startup Flow → Login → Ownership
 
 **Boot Sequence** ([main.js](main.js#L200), [src/index.js](src/index.js#L7044))
