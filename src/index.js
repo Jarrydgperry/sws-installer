@@ -6588,8 +6588,25 @@ function OwnedAircraftCard({
   });
   // Track transient version fetching if initial attempt produced no version string
   const [versionFetching, setVersionFetching] = useState(false);
-  // True once the startup version fetch has completed at least once (avoids premature 'not available')
-  const [versionFetchDone, setVersionFetchDone] = useState(false);
+  // True once the startup version fetch has completed at least once (avoids premature 'not available').
+  // Initialize to true only if the warm cache already has a probed entry for this product —
+  // this prevents a brief "Download" flash for products with no CDN files when the warm cache
+  // was populated by the preheat but the per-card fetch hasn't started yet.
+  const [versionFetchDone, setVersionFetchDone] = useState(() => {
+    try {
+      const warm = window.__swsVersionWarmCache;
+      if (!warm) return false;
+      const pid = String(product?.id || "");
+      const hasKey =
+        `${pid}:FS2020:Public` in warm ||
+        `${pid}:FS2024:Public` in warm ||
+        `${pid}:FS2020:Beta` in warm ||
+        `${pid}:FS2024:Beta` in warm;
+      return hasKey;
+    } catch {
+      return false;
+    }
+  });
   const versionFetchTriedRef = useRef({}); // key: product:id:sim:chan => tried boolean
 
   // Rescue deep scan removed — the efficient preheat + fast-prefetch paths are sufficient.
@@ -6801,17 +6818,18 @@ function OwnedAircraftCard({
         }
       };
       const forceFresh = !!opts.forceFresh;
-      // Global warm cache early return: if a preheater already fetched a version for this product/sim/channel, use it
+      // Global warm cache early return: if a preheater already fetched a version for this product/sim/channel, use it.
+      // Also honour an empty-string entry — it means the preheat probed the CDN and confirmed 404 (no manifest).
       try {
         const key = `${product?.id || "x"}:${simTag}:${channel}`;
         if (
           !forceFresh &&
           window.__swsVersionWarmCache &&
-          window.__swsVersionWarmCache[key]
+          key in window.__swsVersionWarmCache
         ) {
           const warmVer = window.__swsVersionWarmCache[key];
           dbg("Warm cache hit", { key, version: warmVer });
-          return warmVer;
+          return warmVer; // may be "" — caller treats empty string as unavailable
         }
       } catch {}
       const versionFromAny = (text, contentType = "") => {
@@ -8324,11 +8342,11 @@ function OwnedAircraftCard({
         // the matching entry in the install cache (pkg-cache) reliably.
         const folderCandidates = new Set();
         if (folder) folderCandidates.add(folder);
-        const owned = ownedAircraft.find((p) => p.id === product.id);
+        // product IS the ownedAircraft entry for this card — use it directly
         const cleanSeg2 = (s) => String(s || "").split(/[\\/]/).pop();
-        if (owned?.bunny?.folder) folderCandidates.add(cleanSeg2(owned.bunny.folder));
-        if (owned?.bunny?.zip) folderCandidates.add(cleanSeg2(owned.bunny.zip).replace(/\.zip$/i, ""));
-        (owned?.bunny?.altFolders || []).forEach((f) => folderCandidates.add(cleanSeg2(f)));
+        if (product?.bunny?.folder) folderCandidates.add(cleanSeg2(product.bunny.folder));
+        if (product?.bunny?.zip) folderCandidates.add(cleanSeg2(product.bunny.zip).replace(/\.zip$/i, ""));
+        (product?.bunny?.altFolders || []).forEach((f) => folderCandidates.add(cleanSeg2(f)));
 
         // Capture extract/cache location BEFORE unlinking
         const extractTargets = new Set();
@@ -9518,6 +9536,13 @@ function OwnedAircraftCard({
                 }[semanticState] || "";
               const finalTitle = title + (titleExtra ? `\n${titleExtra}` : "");
               const handleClick = async () => {
+                // Safety guard: re-check availability at click time.
+                // The button may have been enabled during the brief window before
+                // versionFetchDone fires. If the product is unavailable, do nothing.
+                if (noAvailableDownloads) {
+                  onStatus?.("This product is not yet available for download.");
+                  return;
+                }
                 if (flowBusy) {
                   // If an actual download is running, abort it
                   if (isBusyDl) {
@@ -15632,6 +15657,16 @@ const App = () => {
         setStatus(
           `Couldn't complete download (${simTag}, ${channel}): ${e?.message || String(e)}`,
         );
+        // If the CDN confirmed the file doesn't exist (4xx), clear the remote
+        // version for this sim so the card immediately flips to "Currently Not
+        // Available" and the download button is disabled for future clicks.
+        if (/not available on server|HTTP 4\d\d/i.test(e?.message || "")) {
+          if (channel === "Beta") {
+            setRemoteVersBeta((prev) => ({ ...prev, [simTag]: "" }));
+          } else {
+            setRemoteVersPublic((prev) => ({ ...prev, [simTag]: "" }));
+          }
+        }
       }
       setDownloadProgress(null);
       return null;
@@ -17550,12 +17585,18 @@ const App = () => {
                   onClick={async () => {
                     try {
                       await waitForElectronBridge();
-                      if (logsDir) {
-                        await window.electron?.revealInFolder?.(logsDir);
-                      } else {
+                      let dir = logsDir;
+                      if (!dir) {
                         const res = await window.electron?.getLogsDir?.();
-                        if (res?.logsDir)
-                          await window.electron?.revealInFolder?.(res.logsDir);
+                        if (res?.logsDir) dir = res.logsDir;
+                      }
+                      if (dir) {
+                        const opener =
+                          window.electron?.openFolder ||
+                          window.electron?.revealInFolder;
+                        if (opener) await opener(dir);
+                      } else {
+                        setStatus("Logs folder is not configured.");
                       }
                     } catch (err) {
                       setStatus(

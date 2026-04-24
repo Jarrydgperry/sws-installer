@@ -1003,24 +1003,37 @@ async function downloadToDownloadsWithResume(
     head = { statusCode: 0, contentLength: 0, etag: "", lastModified: "" };
   }
   if (!head || head.statusCode >= 400) {
+    // If HEAD returned a definitive 4xx, abort immediately — the file is not on the server.
+    // Only fall back to a Range probe when HEAD was blocked (non-4xx failure / status 0).
+    const headStatus = head?.statusCode || 0;
+    if (headStatus >= 400 && headStatus < 500) {
+      throw new Error(
+        `File not available on server (HTTP ${headStatus}). The product may not have been released yet.`,
+      );
+    }
     // Fallback to tiny GET with Range to obtain meta when HEAD is blocked
-    let meta;
+    let rangeMeta;
     try {
-      meta = await rangeMetaRequest(url);
+      rangeMeta = await rangeMetaRequest(url);
     } catch {}
-    if (!meta || (meta.statusCode !== 200 && meta.statusCode !== 206)) {
-      // Proceed without meta instead of aborting; some CDNs block HEAD and Range but allow GET
+    if (!rangeMeta || (rangeMeta.statusCode !== 200 && rangeMeta.statusCode !== 206)) {
+      // Range probe also failed. If it returned a 4xx, the file is confirmed missing.
+      const rangeStatus = rangeMeta?.statusCode || 0;
+      if (rangeStatus >= 400 && rangeStatus < 500) {
+        throw new Error(
+          `File not available on server (HTTP ${rangeStatus}). The product may not have been released yet.`,
+        );
+      }
+      // Non-4xx failure: CDN blocks probes but may still serve GET — proceed without meta.
       try {
         console.warn(
           "[DOWNLOAD:meta] probe failed; proceeding without content-length",
-          {
-            statusHead: head?.statusCode || 0,
-          },
+          { statusHead: headStatus },
         );
       } catch {}
       head = { statusCode: 200, contentLength: 0, etag: "", lastModified: "" };
     } else {
-      head = meta;
+      head = rangeMeta;
     }
   }
   const total = head.contentLength;
