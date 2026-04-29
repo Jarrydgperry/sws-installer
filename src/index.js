@@ -2320,17 +2320,14 @@ function OwnedAircraftCard({
       } catch {}
       async function betaExistsOnce(simKey) {
         try {
-          // Check warm cache first — preheat may have already probed this Beta URL
+          // Check warm cache first — preheat populates this for all beta testers at login.
+          // Any key present (even "") is authoritative: "" = confirmed 404, non-empty = version found.
           const warmKey = `${pid}:FS${simKey}:Beta`;
-          if (warmKey in (window.__swsVersionWarmCache || {})) {
-            const warmVal = (
-              window.__swsVersionWarmCache[warmKey] || ""
-            ).trim();
-            // Only trust the warm cache as a negative if it was explicitly marked as a confirmed 404
-            // (non-empty string = version found = positive; empty string = not yet fetched or unknown)
-            if (warmVal) return true;
-            // Empty string: don't short-circuit — fall through to live HEAD probe
+          const warm = window.__swsVersionWarmCache || {};
+          if (warmKey in warm) {
+            return !!(warm[warmKey] || "").trim();
           }
+          // Cache miss (preheat timed out or hasn't run yet) — do one live HEAD probe.
           const route = getDeterministicCdnRoute(product, simKey, "Beta");
           const bucket = route.bucket;
           const folder =
@@ -2339,30 +2336,38 @@ function OwnedAircraftCard({
               ? encodePathSegments(product.bunny.folder)
               : "");
           if (!folder) return false;
-          const url = `https://sws-installer.b-cdn.net/${bucket}/Beta/${folder}/manifest.json?_=${cdnCacheBucket()}`;
+          // Strip cache-bust from probe URL so the key is stable across calls
+          const url = `https://sws-installer.b-cdn.net/${bucket}/Beta/${folder}/manifest.json`;
+          let found = false;
           try {
             // Use main-process IPC to bypass CORS restrictions on renderer-side fetch
             if (window?.electron?.netHead) {
               const res = await window.electron.netHead(url);
-              if (res && res.ok) return true;
+              found = !!(res && res.ok);
             } else if (window?.electron?.netFetchText) {
               const res = await window.electron.netFetchText(url, {
                 method: "HEAD",
                 timeoutMs: 4000,
               });
-              if (res && res.ok) return true;
+              found = !!(res && res.ok);
             } else {
-              const ok = await fetchWithTimeout(
+              found = await fetchWithTimeout(
                 url,
                 { method: "HEAD", cache: "no-store" },
                 3000,
               )
                 .then((r) => r.ok)
                 .catch(() => false);
-              if (ok) return true;
             }
           } catch {}
-          return false;
+          // Write result back to warm cache so subsequent mounts don't re-probe
+          try {
+            if (!window.__swsVersionWarmCache) window.__swsVersionWarmCache = {};
+            // Store "" for 404 (unavailable) — same convention as preheat
+            window.__swsVersionWarmCache[warmKey] =
+              window.__swsVersionWarmCache[warmKey] ?? (found ? "live-probe" : "");
+          } catch {}
+          return found;
         } catch {
           return false;
         }
@@ -6369,13 +6374,37 @@ function OwnedAircraftCard({
       remoteVersBeta.FS2024
     );
     if (haveAny) return; // don't override existing populated values
-    // If the warm cache already has a positive version for this product, seed state and skip
+    // If the warm cache already covers all relevant combos (even as empty strings = confirmed 404),
+    // seed state from it and skip live fetches entirely.
     try {
       const pid = product?.id || "x";
       const wc = window.__swsVersionWarmCache;
       if (wc) {
         const v20 = wc[`${pid}:FS2020:Public`] || "";
         const v24 = wc[`${pid}:FS2024:Public`] || "";
+        const b20 = wc[`${pid}:FS2020:Beta`] || "";
+        const b24 = wc[`${pid}:FS2024:Beta`] || "";
+        const pubProbed =
+          (!_is24only ? `${pid}:FS2020:Public` in wc : true) &&
+          `${pid}:FS2024:Public` in wc;
+        if (pubProbed) {
+          // All public keys are present — warm cache is authoritative, no fetch needed
+          directVersionPrefetchRef.current = true;
+          if (v20 || v24) {
+            setRemoteVersPublic((prev) => ({
+              FS2020: pickMaxVer(prev.FS2020, v20),
+              FS2024: pickMaxVer(prev.FS2024, v24),
+            }));
+          }
+          if (b20 || b24) {
+            setRemoteVersBeta((prev) => ({
+              FS2020: pickMaxVer(prev.FS2020, b20),
+              FS2024: pickMaxVer(prev.FS2024, b24),
+            }));
+          }
+          return;
+        }
+        // Partial: public version found for at least one sim — seed & skip
         if (v20 || v24) {
           directVersionPrefetchRef.current = true;
           setRemoteVersPublic((prev) => ({
@@ -6420,7 +6449,8 @@ function OwnedAircraftCard({
       return "";
     };
     (async () => {
-      const channels = ["Public", "Beta"];
+      // Only probe Beta channel for beta testers — non-testers never need it
+      const channels = isBetaTester ? ["Public", "Beta"] : ["Public"];
       // Try both 2020 & 2024 buckets (some products reuse 2020 path)
       // FS2024-only products must NOT fall back to the 2020 bucket
       const _prefetchIs24only =
@@ -6479,6 +6509,20 @@ function OwnedAircraftCard({
       const pub24 = results["Public:2024"] || "";
       const beta20 = results["Beta:2020"] || "";
       const beta24 = results["Beta:2024"] || "";
+      // Write results back to warm cache so future mounts / refreshes skip the live fetch.
+      // Store "" for probed-but-not-found combos so the all-probed check above short-circuits.
+      try {
+        if (!window.__swsVersionWarmCache) window.__swsVersionWarmCache = {};
+        const wc = window.__swsVersionWarmCache;
+        const pid = product?.id || "x";
+        const _setWarm = (k, v) => { if (!(k in wc)) wc[k] = v; };
+        if (!_is24only) _setWarm(`${pid}:FS2020:Public`, pub20);
+        _setWarm(`${pid}:FS2024:Public`, pub24);
+        if (isBetaTester) {
+          if (!_is24only) _setWarm(`${pid}:FS2020:Beta`, beta20);
+          _setWarm(`${pid}:FS2024:Beta`, beta24);
+        }
+      } catch {}
       if (window.__SWS_DEBUG_GLOBAL) {
         console.debug("[fast-prefetch] results", {
           product: product?.id,
@@ -9640,11 +9684,12 @@ function OwnedAircraftCard({
                   await beginDownloadFlowWithChan(target, intendedChan);
                 }
               };
-              // Disable Modify when product is fully unavailable and nothing is installed or cached
+              // Disable Modify when product is fully unavailable and nothing is installed or cached.
+              // Also keep enabled when beta is available — the cog is the only way to switch to the Beta channel.
               const _anyInstalled = !!(installed2020 || installed2024);
               const _anyCached = !!(dl2020?.localPath || dl2024?.localPath);
               const gearEnabled =
-                !noAvailableDownloads || _anyInstalled || _anyCached;
+                !noAvailableDownloads || _anyInstalled || _anyCached || betaToggleVisible;
               return (
                 <div
                   style={{
@@ -11419,6 +11464,8 @@ const App = () => {
   const [aircraftList, setAircraftList] = useState([]);
   // Track ownership fetch retries for current authenticated session to avoid users needing to logout/login
   const ownershipRetryRef = useRef({ attempts: 0, token: null });
+  // True when the next fetchOwnedAircraft run was scheduled by our own auto-retry (prevents infinite loops)
+  const autoRetryPendingRef = useRef(false);
   // Search and filter controls for Owned Products
   // Persisted UI filters
   const [searchQuery, setSearchQuery] = useState(() => {
@@ -12799,6 +12846,14 @@ const App = () => {
       beginInitOp();
       let ownTimeout = null;
       let timedOut = false;
+      // Determine if this run was triggered by our own auto-retry setTimeout.
+      // If not (explicit user refresh or new token), reset the retry counter so
+      // the user can always get a fresh retry cycle by clicking Refresh.
+      const isAutoRetry = autoRetryPendingRef.current;
+      autoRetryPendingRef.current = false;
+      if (!isAutoRetry || ownershipRetryRef.current?.token !== currentToken) {
+        ownershipRetryRef.current = { attempts: 0, token: currentToken };
+      }
       try {
         // Fail fast if ownership endpoint stalls, so loader can't spin forever.
         ownTimeout = setTimeout(() => {
@@ -12822,8 +12877,14 @@ const App = () => {
         );
 
         if (!res.ok) {
-          setOwnedAircraft([]); // clear stale list on error
-          setStatus(`Could not fetch owned aircraft: HTTP ${res.status}`);
+          if (res.status === 401 || res.status === 403) {
+            // Auth failure — token expired or revoked; must re-login
+            setOwnedAircraft([]);
+            setStatus(`Session expired (HTTP ${res.status}). Please sign in again.`);
+          } else {
+            // Transient error (400, 429, 5xx, etc.) — keep stale list visible
+            setStatus(`Could not refresh products (HTTP ${res.status}). Showing cached data.`);
+          }
           return;
         }
 
@@ -12837,37 +12898,31 @@ const App = () => {
         }
 
         if (!Array.isArray(data)) {
-          setOwnedAircraft([]);
-          setStatus("No products found for this account.");
+          // Keep existing list visible; schedule a retry in case this was a transient bad response
+          setStatus("Unexpected response from server. Retrying…");
           try {
+            autoRetryPendingRef.current = true;
             setTimeout(() => setRefreshTick((t) => t + 1), 1500);
           } catch {}
           return;
         }
 
-        // If array is empty on first attempt for this token, retry once after short delay (covers propagation lag)
-        try {
-          const ref = ownershipRetryRef.current || {
-            attempts: 0,
-            token: token,
-          };
-          if (ref.token !== token) {
-            // new token/session -> reset counters
-            ownershipRetryRef.current = { attempts: 0, token };
+        // If array is empty, retry once after a short delay (covers WP propagation lag on fresh accounts)
+        if (data.length === 0) {
+          if (ownershipRetryRef.current.attempts < 1) {
+            ownershipRetryRef.current.attempts += 1;
+            setStatus("Syncing products…");
+            autoRetryPendingRef.current = true;
+            setTimeout(() => {
+              try { setRefreshTick((t) => t + 1); } catch {}
+            }, 1500);
+            return; // do not treat as final empty yet
           }
-          if (Array.isArray(data) && data.length === 0) {
-            if (ownershipRetryRef.current.attempts < 1) {
-              ownershipRetryRef.current.attempts += 1;
-              setStatus("Syncing products…");
-              setTimeout(() => {
-                try {
-                  setRefreshTick((t) => t + 1);
-                } catch {}
-              }, 1500);
-              return; // do not treat as final empty yet
-            }
-          }
-        } catch {}
+          // Retries exhausted — genuinely empty account
+          setOwnedAircraft([]);
+          setStatus("No products found for this account.");
+          return;
+        }
 
         // Attach Bunny.net info with robust fallbacks by name/SKU
         let sawPulseCandidate = false;
@@ -13852,9 +13907,9 @@ const App = () => {
         let idx = 0;
         async function runOne(task) {
           try {
-            // Skip if already warmed
+            // Skip if already probed — presence check covers both positive versions AND confirmed 404 ("")
             const warmKey = `${task.prodId}:${task.simTag}:${task.channel}`;
-            if (window.__swsVersionWarmCache[warmKey]) return;
+            if (warmKey in window.__swsVersionWarmCache) return;
             // ETag conditional request — 304 means content unchanged, reuse cached version
             const cached = window.__swsManifestEtagCache?.get(task.url);
             const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
@@ -13889,11 +13944,15 @@ const App = () => {
               window.__swsVersionWarmCache[warmKey] = cached.version;
               return;
             }
-            if (!ok) return;
+            if (!ok) {
+              // Store "" to signal confirmed 404 — prevents re-probing on next run
+              window.__swsVersionWarmCache[warmKey] = "";
+              return;
+            }
             const ver = parseVer(text);
-            if (!ver) return;
-            window.__swsVersionWarmCache[warmKey] = ver;
-            if (etag) {
+            // Store result either way: version string if found, "" if manifest had no parseable version
+            window.__swsVersionWarmCache[warmKey] = ver || "";
+            if (ver && etag) {
               try {
                 window.__swsManifestEtagCache.set(task.url, {
                   etag,
@@ -18865,6 +18924,7 @@ function addCacheBust(u) {
 }
 // Quick existence check for download URLs (with timeout)
 async function headOk(url, timeoutMs = 4500) {
+  let headStatus = 0;
   try {
     const h = await fetchWithTimeout(
       url,
@@ -18872,9 +18932,12 @@ async function headOk(url, timeoutMs = 4500) {
       timeoutMs,
     );
     if (h.ok) return true;
-    // Non-ok HEAD; fall through to GET Range fallback for hosts that restrict HEAD.
+    headStatus = h.status || 0;
+    // Definitive 4xx = file does not exist; Range probe won't help
+    if (headStatus >= 400 && headStatus < 500) return false;
+    // Non-4xx non-ok (5xx, network issue): fall through to GET Range fallback
   } catch {}
-  // Network error (timeout, DNS, etc.) — try GET Range as last resort
+  // Network error, timeout, or HEAD blocked by CDN — try GET Range as last resort
   try {
     const g = await fetchWithTimeout(
       url,

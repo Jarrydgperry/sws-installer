@@ -1900,10 +1900,13 @@ ipcMain.handle("net:head", async (_e, { url } = {}) => {
     try {
       info = await headRequest(u);
     } catch {}
+    // Only fall back to Range GET when HEAD was blocked/errored (status 0) — NOT on a
+    // definitive 4xx (file not there). Also fall back when HEAD succeeded but returned no metadata.
+    const headStatus = info?.statusCode || 0;
     if (
       !info ||
-      info.statusCode >= 400 ||
-      (!info.contentLength && !info.etag && !info.lastModified)
+      (headStatus < 400 &&
+        (!info.contentLength && !info.etag && !info.lastModified))
     ) {
       try {
         info = await rangeMetaRequest(u);
