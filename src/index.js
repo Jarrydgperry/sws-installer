@@ -6759,6 +6759,12 @@ function OwnedAircraftCard({
                   delete window.__swsVersionWarmCache[k];
               }
             }
+            if (window.__swsZipAvailCache) {
+              for (const k of Object.keys(window.__swsZipAvailCache)) {
+                if (k.startsWith(pid + ":"))
+                  delete window.__swsZipAvailCache[k];
+              }
+            }
             if (window.__swsManifestEtagCache) {
               for (const [k] of window.__swsManifestEtagCache) {
                 if (k.includes(product?.bunny?.folder))
@@ -7536,6 +7542,12 @@ function OwnedAircraftCard({
                   delete window.__swsVersionWarmCache[k];
               }
             }
+            if (window.__swsZipAvailCache) {
+              for (const k of Object.keys(window.__swsZipAvailCache)) {
+                if (k.startsWith(pid + ":"))
+                  delete window.__swsZipAvailCache[k];
+              }
+            }
             if (window.__swsManifestEtagCache) {
               for (const [k] of window.__swsManifestEtagCache) {
                 if (k.includes(product?.bunny?.folder || "__none__"))
@@ -7601,7 +7613,21 @@ function OwnedAircraftCard({
               (can2020 && (remoteVersPublic.FS2020 || "").trim()) ||
               (can2024 && (remoteVersPublic.FS2024 || "").trim())
             );
-      if (hasRemoteForChannel) return false;
+      if (hasRemoteForChannel) {
+        // Version found — also check if zip is confirmed missing for all applicable sims
+        try {
+          const zc = window.__swsZipAvailCache;
+          if (zc) {
+            const pid = product?.id || "";
+            const z20 = can2020 && (`${pid}:FS2020:${chan}` in zc) ? zc[`${pid}:FS2020:${chan}`] : null;
+            const z24 = can2024 && (`${pid}:FS2024:${chan}` in zc) ? zc[`${pid}:FS2024:${chan}`] : null;
+            const allZipProbed = (!can2020 || z20 !== null) && (!can2024 || z24 !== null);
+            if (allZipProbed && !((can2020 && z20 === true) || (can2024 && z24 === true)))
+              return true;
+          }
+        } catch {}
+        return false;
+      }
       // When version fetch hasn't completed yet, consult the warm cache.
       // The preheater runs before products render so warm cache should already be populated.
       if (!versionFetchDone) {
@@ -7612,7 +7638,20 @@ function OwnedAircraftCard({
             const hasWarm =
               (can2020 && !!(warm[`${pid}:FS2020:${chan}`] || "").trim()) ||
               (can2024 && !!(warm[`${pid}:FS2024:${chan}`] || "").trim());
-            if (hasWarm) return false; // warm cache confirms version exists
+            if (hasWarm) {
+            // Warm cache confirms version — also check zip availability
+            try {
+              const zc = window.__swsZipAvailCache;
+              if (zc) {
+                const z20 = can2020 && (`${pid}:FS2020:${chan}` in zc) ? zc[`${pid}:FS2020:${chan}`] : null;
+                const z24 = can2024 && (`${pid}:FS2024:${chan}` in zc) ? zc[`${pid}:FS2024:${chan}`] : null;
+                const allZipProbed = (!can2020 || z20 !== null) && (!can2024 || z24 !== null);
+                if (allZipProbed && !((can2020 && z20 === true) || (can2024 && z24 === true)))
+                  return true;
+              }
+            } catch {}
+            return false; // warm cache confirms version exists
+          }
             // If warm cache keys exist but are empty, CDN returned 404 → unavailable
             const allProbed =
               (!can2020 || `${pid}:FS2020:${chan}` in warm) &&
@@ -13140,6 +13179,7 @@ const App = () => {
             }
           }
           window.__swsChangelogWarmCache = window.__swsChangelogWarmCache || {};
+          window.__swsZipAvailCache = window.__swsZipAvailCache || {};
           const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
           const allSims = ["2020", "2024"];
           const tasks = [];
@@ -13176,12 +13216,14 @@ const App = () => {
                       : null;
                 // Skip if we'd be creating a duplicate URL task (2020+ FS2024 maps to same URL as FS2020)
                 if (is2020Plus && sk === "2024") continue;
+                const zipName = String(prod.bunny?.zip || "").trim();
                 tasks.push({
                   prodId: prod.id,
                   simTag: `FS${sk}`,
                   channel: ch,
                   url,
                   extraWarmKeys,
+                  zipName,
                 });
                 // Only queue zip-derived fallback when the name actually differs from the canonical folder
                 if (
@@ -13196,6 +13238,8 @@ const App = () => {
                     channel: ch,
                     url: fbUrl,
                     extraWarmKeys,
+                    zipName,
+                    skipZipProbe: true,
                   });
                 }
               }
@@ -13235,6 +13279,23 @@ const App = () => {
             try {
               const warmKey = `${task.prodId}:${task.simTag}:${task.channel}`;
               if (warmKey in window.__swsVersionWarmCache) return;
+              // Probe zip URL after a version is confirmed — tells noAvailableDownloads
+              // whether the actual download file exists on the CDN.
+              const probeZip = async (manifestText) => {
+                if (task.skipZipProbe || warmKey in window.__swsZipAvailCache) return;
+                try {
+                  // Prefer zip name from manifest content (handles versioned filenames)
+                  // Fall back to the static prod.bunny.zip name.
+                  const manifestZipNames = manifestText ? extractZipNamesFromText(manifestText) : [];
+                  const zipNameToProbe = manifestZipNames[0] || task.zipName;
+                  if (!zipNameToProbe) return;
+                  const baseUrl = task.url.slice(0, task.url.lastIndexOf('/') + 1);
+                  const zipOk = await headOk(baseUrl + encodeURIComponent(zipNameToProbe), 3000);
+                  window.__swsZipAvailCache[warmKey] = zipOk;
+                  if (task.extraWarmKeys)
+                    task.extraWarmKeys.forEach(k => { if (!(k in window.__swsZipAvailCache)) window.__swsZipAvailCache[k] = zipOk; });
+                } catch {}
+              };
               // Use ETag conditional request: if Bunny returns 304 the CDN edge serves it
               // with no origin hit and no bandwidth. Only re-fetch when content changed.
               const cached = window.__swsManifestEtagCache?.get(task.url);
@@ -13270,6 +13331,7 @@ const App = () => {
                 window.__swsVersionWarmCache[warmKey] = cached.version;
                 if (task.extraWarmKeys)
                   task.extraWarmKeys.forEach((k) => { window.__swsVersionWarmCache[k] = window.__swsVersionWarmCache[k] || cached.version; });
+                await probeZip(null); // no manifest text on 304, fall back to task.zipName
                 return;
               }
               // Populate extra warm keys (for 2020+ products, one fetch covers both FS2020 and FS2024)
@@ -13295,6 +13357,7 @@ const App = () => {
                 task.extraWarmKeys.forEach((k) => {
                   window.__swsVersionWarmCache[k] = ver;
                 });
+              await probeZip(text);
               if (etag) {
                 try {
                   window.__swsManifestEtagCache.set(task.url, {
@@ -13826,6 +13889,7 @@ const App = () => {
             window.__swsManifestEtagCache = new Map();
           }
         }
+        window.__swsZipAvailCache = window.__swsZipAvailCache || {};
 
         const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
         const allSims = ["2020", "2024"];
@@ -13848,11 +13912,13 @@ const App = () => {
           for (const sk of sims) {
             for (const ch of chans) {
               const url = `https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(folder)}/manifest.json`;
+              const zipNameSec = String(prod.bunny?.zip || "").trim();
               tasks.push({
                 prodId: prod.id,
                 simTag: `FS${sk}`,
                 channel: ch,
                 url,
+                zipName: zipNameSec,
               });
               if (
                 zipFolder &&
@@ -13865,6 +13931,8 @@ const App = () => {
                   simTag: `FS${sk}`,
                   channel: ch,
                   url: fbUrl,
+                  zipName: zipNameSec,
+                  skipZipProbe: true,
                 });
               }
             }
@@ -13910,6 +13978,18 @@ const App = () => {
             // Skip if already probed — presence check covers both positive versions AND confirmed 404 ("")
             const warmKey = `${task.prodId}:${task.simTag}:${task.channel}`;
             if (warmKey in window.__swsVersionWarmCache) return;
+            // Probe zip URL after a version is confirmed
+            const probeZip = async (manifestText) => {
+              if (task.skipZipProbe || warmKey in window.__swsZipAvailCache) return;
+              try {
+                const manifestZipNames = manifestText ? extractZipNamesFromText(manifestText) : [];
+                const zipNameToProbe = manifestZipNames[0] || task.zipName;
+                if (!zipNameToProbe) return;
+                const baseUrl = task.url.slice(0, task.url.lastIndexOf('/') + 1);
+                const zipOk = await headOk(baseUrl + encodeURIComponent(zipNameToProbe), 3000);
+                window.__swsZipAvailCache[warmKey] = zipOk;
+              } catch {}
+            };
             // ETag conditional request — 304 means content unchanged, reuse cached version
             const cached = window.__swsManifestEtagCache?.get(task.url);
             const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
@@ -13942,6 +14022,7 @@ const App = () => {
             // 304 Not Modified — reuse cached version, no parse needed
             if (status === 304 && cached?.version) {
               window.__swsVersionWarmCache[warmKey] = cached.version;
+              await probeZip(null);
               return;
             }
             if (!ok) {
@@ -13952,6 +14033,7 @@ const App = () => {
             const ver = parseVer(text);
             // Store result either way: version string if found, "" if manifest had no parseable version
             window.__swsVersionWarmCache[warmKey] = ver || "";
+            if (ver) await probeZip();
             if (ver && etag) {
               try {
                 window.__swsManifestEtagCache.set(task.url, {
