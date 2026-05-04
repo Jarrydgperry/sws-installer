@@ -397,44 +397,6 @@ const BUNNY_DOWNLOADS = {
     compatibility: "FS2020+",
     thumbnail:
       "https://sws-installer.b-cdn.net/2020/Public/AIRCRAFT-SWS-PC12Legacy/Thumbnail.jpg",
-    components: [
-      {
-        label: "Base",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12.zip",
-        altFolders: ["sws-aircraft-pc12", "pc12", "pc12legacy"],
-      },
-      {
-        label: "GNS + Sky4Sim",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12-gns-sky4sim.zip",
-        altFolders: ["sws-aircraft-pc12-gns-sky4sim"],
-      },
-      {
-        label: "PMS50",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12-pmsgtn.zip",
-        altFolders: ["sws-aircraft-pc12-pmsgtn"],
-      },
-      {
-        label: "PMS50 + Sky4Sim",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12-pmsgtn-sky4sim.zip",
-        altFolders: ["sws-aircraft-pc12-pmsgtn-sky4sim"],
-      },
-      {
-        label: "TDS",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12-tdsgtn.zip",
-        altFolders: ["sws-aircraft-pc12-tdsgtn"],
-      },
-      {
-        label: "TDS + Sky4Sim",
-        folder: "AIRCRAFT-SWS-PC12Legacy",
-        zip: "sws-aircraft-pc12-tdsgtn-sky4sim.zip",
-        altFolders: ["sws-aircraft-pc12-tdsgtn-sky4sim"],
-      },
-    ],
   },
   33811: {
     // RV-10
@@ -2249,11 +2211,10 @@ function OwnedAircraftCard({
   const betaProbeCache = useRef(new Map()); // key: product.id or folder => { v2020, v2024, ts }
   // Product-specific extra Beta filename/folder hints to improve reliable detection without over-exposing toggle
   const BETA_PRODUCT_HINTS = {
-    // PC-12 Legacy (product id 33812) – limited ordered hints (only first 3 used in extended probe)
+    // PC-12 Legacy (product id 33812) – base package only (panel mods removed, handled in-sim via tablet)
     33812: [
-      "manifest.json", // fast HEAD check (most definitive, low size)
-      "sws-aircraft-pc12.zip", // base package
-      "sws-aircraft-pc12-gns-sky4sim.zip", // common variant
+      "manifest.json",
+      "sws-aircraft-pc12.zip",
     ],
   };
   const BETA_DETECTION_VERSION = 1; // Increment if detection semantics change (for debugging / telemetry)
@@ -6327,6 +6288,8 @@ function OwnedAircraftCard({
     (product?.compatibility || product?.bunny?.compatibility) === "FS2024";
   const [remoteVersPublic, setRemoteVersPublic] = useState(() => {
     try {
+      // On refresh mounts (refreshTick > 0), skip stale warm cache — forceFresh fetch will populate correct values
+      if (refreshTick > 0) return { FS2020: "", FS2024: "" };
       const warm = window.__swsVersionWarmCache || {};
       const v20 = warm[`${product?.id}:FS2020:Public`] || "";
       const v24 = warm[`${product?.id}:FS2024:Public`] || "";
@@ -6337,6 +6300,8 @@ function OwnedAircraftCard({
   });
   const [remoteVersBeta, setRemoteVersBeta] = useState(() => {
     try {
+      // On refresh mounts (refreshTick > 0), skip stale warm cache — forceFresh fetch will populate correct values
+      if (refreshTick > 0) return { FS2020: "", FS2024: "" };
       const warm = window.__swsVersionWarmCache || {};
       const v20 = warm[`${product?.id}:FS2020:Beta`] || "";
       const v24 = warm[`${product?.id}:FS2024:Beta`] || "";
@@ -6741,7 +6706,7 @@ function OwnedAircraftCard({
   const versionFetchTickRef = useRef(0);
   useEffect(() => {
     let cancelled = false;
-    const isRefresh = versionFetchTickRef.current > 0;
+    const isRefresh = refreshTick > 0;
     versionFetchTickRef.current = refreshTick || 0;
     (async () => {
       try {
@@ -6868,6 +6833,8 @@ function OwnedAircraftCard({
         }
       };
       const forceFresh = !!opts.forceFresh;
+      // When forceFresh, use a unique timestamp so BunnyCDN edge must re-origin (not served from edge cache)
+      const cb = forceFresh ? (u) => addCacheBust(u, true) : addCacheBust;
       // Global warm cache early return: if a preheater already fetched a version for this product/sim/channel, use it.
       // Also honour an empty-string entry — it means the preheat probed the CDN and confirmed 404 (no manifest).
       try {
@@ -7095,8 +7062,9 @@ function OwnedAircraftCard({
                 // This keeps UI responsive while avoiding a preflight HEAD (which may be blocked by CORS in renderer).
               }
             }
-            const res = await window.electron.netFetchText(addCacheBust(u), {
+            const res = await window.electron.netFetchText(cb(u), {
               timeoutMs: 15000,
+              headers: { "Cache-Control": "no-cache" },
             });
             if (!res || !res.ok) return "";
             const ct =
@@ -7249,7 +7217,7 @@ function OwnedAircraftCard({
           : "";
         if (rawFolder) {
           // Try the preferred bucket first; other bucket is a fallback in the folder loop below
-          const directUrl = addCacheBust(
+          const directUrl = cb(
             `https://sws-installer.b-cdn.net/${preferred}/${chPrimary}/${encodePathSegments(rawFolder)}/manifest.json`,
           );
           if (attemptedUrls) attemptedUrls.push(directUrl);
@@ -7287,7 +7255,7 @@ function OwnedAircraftCard({
           // Standard layout: /{sim}/{channel}/{folder}/manifest.json
           const urls = effectiveFolders
             .flatMap((f) => buildCdnUrls(sk, chPrimary, f, file))
-            .map(addCacheBust);
+            .map(cb);
           for (const u of urls) {
             if (attemptedUrls) attemptedUrls.push(u);
             const v = await readVersionFromUrl(u);
@@ -12946,15 +12914,19 @@ const App = () => {
           return;
         }
 
-        // If array is empty, retry once after a short delay (covers WP propagation lag on fresh accounts)
+        // If array is empty, retry with progressive backoff — covers WP transient/object cache
+        // lag on fresh sessions where the server needs a few seconds to build the response.
         if (data.length === 0) {
-          if (ownershipRetryRef.current.attempts < 1) {
+          const MAX_EMPTY_RETRIES = 3;
+          const retryDelays = [1500, 3000, 5000];
+          if (ownershipRetryRef.current.attempts < MAX_EMPTY_RETRIES) {
+            const delay = retryDelays[ownershipRetryRef.current.attempts] ?? 3000;
             ownershipRetryRef.current.attempts += 1;
-            setStatus("Syncing products…");
+            setStatus(`Syncing products… (${ownershipRetryRef.current.attempts}/${MAX_EMPTY_RETRIES})`);
             autoRetryPendingRef.current = true;
             setTimeout(() => {
               try { setRefreshTick((t) => t + 1); } catch {}
-            }, 1500);
+            }, delay);
             return; // do not treat as final empty yet
           }
           // Retries exhausted — genuinely empty account
@@ -13159,25 +13131,10 @@ const App = () => {
           beginInitOp();
           setStatus("Preparing versions…");
           // Minimal, fast preheater over canonical manifest.json paths
-          // Hydrate warm caches from sessionStorage so a page reload within the same
-          // browser session doesn't re-fetch every manifest (zero origin hits on reload).
-          if (!window.__swsVersionWarmCache) {
-            try {
-              const saved = sessionStorage.getItem("sws_versionWarmCache");
-              window.__swsVersionWarmCache = saved ? JSON.parse(saved) : {};
-            } catch {
-              window.__swsVersionWarmCache = {};
-            }
-          }
-          if (!window.__swsManifestEtagCache) {
-            try {
-              const saved = sessionStorage.getItem("sws_manifestEtagCache");
-              const arr = saved ? JSON.parse(saved) : [];
-              window.__swsManifestEtagCache = new Map(Array.isArray(arr) ? arr : []);
-            } catch {
-              window.__swsManifestEtagCache = new Map();
-            }
-          }
+          // Caches are in-memory only — not persisted to sessionStorage — so versions
+          // are always re-fetched fresh on every app launch.
+          window.__swsVersionWarmCache = window.__swsVersionWarmCache || {};
+          window.__swsManifestEtagCache = window.__swsManifestEtagCache || new Map();
           window.__swsChangelogWarmCache = window.__swsChangelogWarmCache || {};
           window.__swsZipAvailCache = window.__swsZipAvailCache || {};
           const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
@@ -13205,7 +13162,7 @@ const App = () => {
               // Use cdnBucketForSim logic: 2020+ products always use '2020' bucket
               const bucket = is2020Plus ? "2020" : sk;
               for (const ch of chans) {
-                const url = `https://sws-installer.b-cdn.net/${bucket}/${ch}/${encodeURIComponent(folder)}/manifest.json`;
+                const url = addCacheBust(`https://sws-installer.b-cdn.net/${bucket}/${ch}/${encodeURIComponent(folder)}/manifest.json`);
                 // For 2020+ products, both FS2020 and FS2024 map to the same URL;
                 // create one task that populates both warm cache keys.
                 const extraWarmKeys =
@@ -13231,7 +13188,7 @@ const App = () => {
                   zipFolder !== folder &&
                   zipFolder !== folder.toUpperCase()
                 ) {
-                  const fbUrl = `https://sws-installer.b-cdn.net/${bucket}/${ch}/${encodeURIComponent(zipFolder)}/manifest.json`;
+                  const fbUrl = addCacheBust(`https://sws-installer.b-cdn.net/${bucket}/${ch}/${encodeURIComponent(zipFolder)}/manifest.json`);
                   fallbackTasks.push({
                     prodId: prod.id,
                     simTag: `FS${sk}`,
@@ -13299,7 +13256,12 @@ const App = () => {
               // Use ETag conditional request: if Bunny returns 304 the CDN edge serves it
               // with no origin hit and no bandwidth. Only re-fetch when content changed.
               const cached = window.__swsManifestEtagCache?.get(task.url);
-              const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
+              // Cache-Control: no-cache tells BunnyCDN edge to always validate with origin
+              // before serving — works even if the pull zone has "Ignore Query Strings" enabled.
+              const reqHeaders = {
+                "Cache-Control": "no-cache",
+                ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
+              };
               let ok = false,
                 text = "",
                 etag = "",
@@ -13559,24 +13521,6 @@ const App = () => {
           // Mark preheat as done so the global preheater effect doesn't repeat the same work
           try {
             window.__swsPreheatToken = token;
-          } catch {}
-          // Persist warm caches to sessionStorage so page reloads within the same
-          // session skip all manifest fetches entirely.
-          try {
-            sessionStorage.setItem(
-              "sws_versionWarmCache",
-              JSON.stringify(window.__swsVersionWarmCache || {}),
-            );
-          } catch {}
-          try {
-            sessionStorage.setItem(
-              "sws_manifestEtagCache",
-              JSON.stringify(
-                Array.from(
-                  (window.__swsManifestEtagCache || new Map()).entries(),
-                ),
-              ),
-            );
           } catch {}
         } catch {
         } finally {
@@ -13871,24 +13815,9 @@ const App = () => {
         if (window.__swsPreheatToken === token) return;
         window.__swsPreheatToken = token;
 
-        // Prepare caches — hydrate from sessionStorage on first use
-        if (!window.__swsVersionWarmCache) {
-          try {
-            const saved = sessionStorage.getItem("sws_versionWarmCache");
-            window.__swsVersionWarmCache = saved ? JSON.parse(saved) : {};
-          } catch {
-            window.__swsVersionWarmCache = {};
-          }
-        }
-        if (!window.__swsManifestEtagCache) {
-          try {
-            const saved = sessionStorage.getItem("sws_manifestEtagCache");
-            const arr = saved ? JSON.parse(saved) : [];
-            window.__swsManifestEtagCache = new Map(Array.isArray(arr) ? arr : []);
-          } catch {
-            window.__swsManifestEtagCache = new Map();
-          }
-        }
+        // Prepare caches — in-memory only, not persisted to sessionStorage
+        window.__swsVersionWarmCache = window.__swsVersionWarmCache || {};
+        window.__swsManifestEtagCache = window.__swsManifestEtagCache || new Map();
         window.__swsZipAvailCache = window.__swsZipAvailCache || {};
 
         const chans = isBetaTester ? ["Public", "Beta"] : ["Public"];
@@ -13911,7 +13840,7 @@ const App = () => {
           const zipFolder = zipBase ? zipBase.toUpperCase() : "";
           for (const sk of sims) {
             for (const ch of chans) {
-              const url = `https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(folder)}/manifest.json`;
+              const url = addCacheBust(`https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(folder)}/manifest.json`);
               const zipNameSec = String(prod.bunny?.zip || "").trim();
               tasks.push({
                 prodId: prod.id,
@@ -13925,7 +13854,7 @@ const App = () => {
                 zipFolder !== folder &&
                 zipFolder !== folder.toUpperCase()
               ) {
-                const fbUrl = `https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(zipFolder)}/manifest.json`;
+                const fbUrl = addCacheBust(`https://sws-installer.b-cdn.net/${sk}/${ch}/${encodeURIComponent(zipFolder)}/manifest.json`);
                 tasks.push({
                   prodId: prod.id,
                   simTag: `FS${sk}`,
@@ -13992,7 +13921,11 @@ const App = () => {
             };
             // ETag conditional request — 304 means content unchanged, reuse cached version
             const cached = window.__swsManifestEtagCache?.get(task.url);
-            const reqHeaders = cached?.etag ? { "If-None-Match": cached.etag } : {};
+            // Cache-Control: no-cache forces BunnyCDN edge to re-validate with origin.
+            const reqHeaders = {
+              "Cache-Control": "no-cache",
+              ...(cached?.etag ? { "If-None-Match": cached.etag } : {}),
+            };
             let ok = false,
               text = "",
               etag = "",
@@ -17867,7 +17800,7 @@ const App = () => {
             className="main-scroll-area"
             style={{
               flex: 1,
-              padding: "32px 48px",
+              padding: "0 48px 32px",
               background: "#181c20",
               overflowY: "auto",
               height: "calc(100vh - 28vh)",
@@ -17882,6 +17815,11 @@ const App = () => {
                 gridTemplateColumns: "1fr auto",
                 alignItems: "center",
                 gap: 12,
+                position: "sticky",
+                top: 0,
+                zIndex: 10,
+                background: "#181c20",
+                padding: "32px 0 12px",
                 marginBottom: 12,
               }}
             >
@@ -17995,6 +17933,13 @@ const App = () => {
                     onClick={async () => {
                       try {
                         setStatus("Checking for updates…");
+                        // Clear all version and zip availability caches so the preheat
+                        // always re-fetches fresh from CDN on refresh.
+                        try {
+                          window.__swsVersionWarmCache = {};
+                          window.__swsManifestEtagCache = new Map();
+                          window.__swsZipAvailCache = {};
+                        } catch {}
                         setOwnedAircraft([]);
                         // Show loader while reloading
                         try {
@@ -18966,11 +18911,12 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
 }
 // Append a cache-busting query param for Bunny URLs; uses a 5-minute bucket
 // so CDN edges can cache the response and serve it to multiple clients.
+// Pass force=true to use a unique timestamp (bypasses BunnyCDN edge on refresh/channel switch).
 const CDN_CACHE_BUCKET_MS = 5 * 60 * 1000; // 5 minutes
 function cdnCacheBucket() {
   return Math.floor(Date.now() / CDN_CACHE_BUCKET_MS) * CDN_CACHE_BUCKET_MS;
 }
-function addCacheBust(u) {
+function addCacheBust(u, force = false) {
   try {
     const url = new URL(u);
     // Only cache-bust our Bunny host and only when the URL isn't signed (no query/signature params)
@@ -18995,7 +18941,7 @@ function addCacheBust(u) {
           ),
       );
       if (!hasQuery && !hasSigLike) {
-        qs.set("_", String(cdnCacheBucket()));
+        qs.set("_", force ? String(Date.now()) : String(cdnCacheBucket()));
         return url.toString();
       }
     }
